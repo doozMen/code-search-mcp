@@ -178,26 +178,10 @@ actor ProjectIndexer: Sendable {
         let pathExtension = (filePath as NSString).pathExtension.lowercased()
         let language = supportedExtensions[pathExtension] ?? "Unknown"
 
-        // TODO: Implement language-specific parsing
-        // For now, return a basic chunk for the entire file
-        let relativeFilePath = filePath.replacingOccurrences(
-            of: projectName + "/",
-            with: ""
+        throw CodeSearchError.notYetImplemented(
+            feature: "Language-specific code chunk parsing",
+            issueNumber: nil
         )
-
-        let chunk = CodeChunk(
-            id: UUID().uuidString,
-            projectName: projectName,
-            filePath: relativeFilePath,
-            language: language,
-            startLine: 1,
-            endLine: content.split(separator: "\n").count,
-            content: content,
-            chunkType: "file",
-            embedding: nil
-        )
-
-        return [chunk]
     }
 }
 

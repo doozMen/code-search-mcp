@@ -52,13 +52,10 @@ actor VectorSearchService: Sendable {
         // Generate embedding for the query
         let queryEmbedding = try await embeddingService.generateEmbedding(for: query)
 
-        // TODO: Load indexed code chunks from storage
-        // TODO: Filter by project if specified
-        // TODO: Compute cosine similarity scores for each chunk
-        // TODO: Sort and return top results
-
-        // Placeholder implementation
-        return []
+        throw CodeSearchError.notYetImplemented(
+            feature: "Vector search with cosine similarity",
+            issueNumber: nil
+        )
     }
 
     // MARK: - Similarity Computation
@@ -101,9 +98,10 @@ actor VectorSearchService: Sendable {
     /// - Returns: Array of all indexed code chunks
     /// - Throws: If index loading fails
     private func loadIndexedChunks() async throws -> [CodeChunk] {
-        // TODO: Implement loading from persistent storage
-        // For now, return empty array
-        return []
+        throw CodeSearchError.notYetImplemented(
+            feature: "Loading indexed chunks from persistent storage",
+            issueNumber: nil
+        )
     }
 
     /// Load chunks for a specific project.
@@ -112,8 +110,10 @@ actor VectorSearchService: Sendable {
     /// - Returns: Array of code chunks from that project
     /// - Throws: If project index loading fails
     private func loadProjectChunks(projectName: String) async throws -> [CodeChunk] {
-        // TODO: Implement project-specific loading
-        return []
+        throw CodeSearchError.notYetImplemented(
+            feature: "Loading project-specific chunks",
+            issueNumber: nil
+        )
     }
 }
 

@@ -292,7 +292,7 @@ actor MCPServer: Sendable {
 
         return CallTool.Result(
             content: [
-                .text(.init(text: contextText))
+                .text(contextText)
             ]
         )
     }
@@ -322,7 +322,7 @@ actor MCPServer: Sendable {
         let resultText = formatRelatedFiles(relatedFiles)
         return CallTool.Result(
             content: [
-                .text(.init(text: resultText))
+                .text(resultText)
             ]
         )
     }
@@ -346,7 +346,7 @@ actor MCPServer: Sendable {
 
         return CallTool.Result(
             content: [
-                .text(.init(text: statusText))
+                .text(statusText)
             ]
         )
     }
@@ -358,7 +358,7 @@ actor MCPServer: Sendable {
         guard !results.isEmpty else {
             return CallTool.Result(
                 content: [
-                    .text(.init(text: "No results found."))
+                    .text("No results found.")
                 ]
             )
         }
@@ -371,15 +371,15 @@ actor MCPServer: Sendable {
             Line: \(result.lineNumber)
             Language: \(result.language)
             Relevance: \(String(format: "%.2f", result.relevanceScore))
-            
+
             \(result.context)
-            
+
             """
         }
 
         return CallTool.Result(
             content: [
-                .text(.init(text: output))
+                .text(output)
             ]
         )
     }

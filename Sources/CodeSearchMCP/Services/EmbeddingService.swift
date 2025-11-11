@@ -1,4 +1,3 @@
-import Embeddings
 import Foundation
 import Logging
 
@@ -73,22 +72,10 @@ actor EmbeddingService: Sendable {
             "text_length": "\(text.count)"
         ])
 
-        // TODO: Integrate with swift-embeddings to generate BERT embeddings
-        // For now, return a placeholder embedding
-        var embedding = [Float](repeating: 0.0, count: embeddingDimension)
-
-        // Compute a simple hash-based placeholder (deterministic for same text)
-        let hash = text.hashValue
-        for i in 0..<embeddingDimension {
-            let seed = abs(hash) + i
-            let random = sin(Float(seed)) * cos(Float(seed + 1))
-            embedding[i] = (random + 1.0) / 2.0 // Normalize to 0-1
-        }
-
-        // Cache the embedding
-        try await cacheEmbedding(embedding, for: text)
-
-        return embedding
+        throw CodeSearchError.notYetImplemented(
+            feature: "BERT embedding generation",
+            issueNumber: nil
+        )
     }
 
     /// Generate embeddings for multiple text strings in batch.

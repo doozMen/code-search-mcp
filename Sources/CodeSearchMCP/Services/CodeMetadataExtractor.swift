@@ -54,13 +54,10 @@ actor CodeMetadataExtractor: Sendable {
             "direction": "\(direction)"
         ])
 
-        // TODO: Load dependency graph
-        // TODO: Traverse based on direction
-        // TODO: Collect all related files
-        // TODO: Return sorted list
-
-        // Placeholder implementation
-        return []
+        throw CodeSearchError.notYetImplemented(
+            feature: "Dependency graph traversal for related files",
+            issueNumber: nil
+        )
     }
 
     /// Extract dependencies from a code file.
@@ -132,10 +129,7 @@ actor CodeMetadataExtractor: Sendable {
     /// - import statements
     /// - from ... import statements
     private func extractPythonDependencies(from content: String, filePath: String) -> [Dependency] {
-        // TODO: Use regex to find import and from...import statements
-        // Patterns:
-        // - ^import\s+(\w+)
-        // - ^from\s+(\w+)\s+import
+        // Not yet implemented - requires regex for import and from...import statements
         return []
     }
 
@@ -145,10 +139,7 @@ actor CodeMetadataExtractor: Sendable {
     /// - import statements
     /// - require() calls
     private func extractJavaScriptDependencies(from content: String, filePath: String) -> [Dependency] {
-        // TODO: Use regex to find import and require statements
-        // Patterns:
-        // - import\s+.*\s+from\s+['\"]([^'\"]+)['\"]
-        // - require\(['\"]([^'\"]+)['\"]\)
+        // Not yet implemented - requires regex for import and require statements
         return []
     }
 
@@ -157,8 +148,7 @@ actor CodeMetadataExtractor: Sendable {
     /// Looks for:
     /// - import statements
     private func extractJavaDependencies(from content: String, filePath: String) -> [Dependency] {
-        // TODO: Use regex to find import statements
-        // Pattern: ^import\s+(.+);
+        // Not yet implemented - requires regex for import statements
         return []
     }
 
@@ -173,10 +163,10 @@ actor CodeMetadataExtractor: Sendable {
             "project": "\(projectName)"
         ])
 
-        // TODO: Load all code chunks for project
-        // TODO: Extract dependencies for each chunk
-        // TODO: Build bidirectional graph
-        // TODO: Cache graph to disk
+        throw CodeSearchError.notYetImplemented(
+            feature: "Dependency graph building and caching",
+            issueNumber: nil
+        )
     }
 
     /// Get the dependency graph for a project.
@@ -188,12 +178,9 @@ actor CodeMetadataExtractor: Sendable {
         let graphPath = (dependencyGraphDir as NSString)
             .appendingPathComponent("\(projectName).graph.json")
 
-        // TODO: Load graph from disk or rebuild if missing
-        // Placeholder
-        return DependencyGraph(
-            projectName: projectName,
-            importsMap: [:],
-            importedByMap: [:]
+        throw CodeSearchError.notYetImplemented(
+            feature: "Dependency graph loading and caching",
+            issueNumber: nil
         )
     }
 
@@ -205,8 +192,10 @@ actor CodeMetadataExtractor: Sendable {
     /// - Returns: Array of files that import this file
     /// - Throws: If lookup fails
     private func getImporters(of filePath: String) async throws -> [String] {
-        // TODO: Query dependency graph for files that import this file
-        return []
+        throw CodeSearchError.notYetImplemented(
+            feature: "Reverse dependency lookup (importers)",
+            issueNumber: nil
+        )
     }
 
     /// Find all files this file imports/references.
@@ -215,8 +204,10 @@ actor CodeMetadataExtractor: Sendable {
     /// - Returns: Array of files imported by this file
     /// - Throws: If lookup fails
     private func getImports(from filePath: String) async throws -> [String] {
-        // TODO: Query dependency graph for imports from this file
-        return []
+        throw CodeSearchError.notYetImplemented(
+            feature: "Forward dependency lookup (imports)",
+            issueNumber: nil
+        )
     }
 }
 

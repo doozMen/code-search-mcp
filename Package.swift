@@ -16,11 +16,6 @@ let package = Package(
             url: "https://github.com/modelcontextprotocol/swift-sdk.git",
             from: "0.9.0"
         ),
-        // Vector Embeddings (BERT 384-d)
-        .package(
-            url: "https://github.com/apple/swift-embeddings.git",
-            from: "0.0.23"
-        ),
         // Logging Infrastructure
         .package(
             url: "https://github.com/apple/swift-log.git",
@@ -42,7 +37,6 @@ let package = Package(
             name: "CodeSearchMCP",
             dependencies: [
                 .product(name: "MCP", package: "swift-sdk"),
-                .product(name: "Embeddings", package: "swift-embeddings"),
                 .product(name: "Logging", package: "swift-log"),
                 .product(name: "ArgumentParser", package: "swift-argument-parser"),
                 .product(name: "NIO", package: "swift-nio"),

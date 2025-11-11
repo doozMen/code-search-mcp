@@ -19,11 +19,11 @@ struct CodeSearchMCP: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "code-search-mcp",
         abstract: "MCP server for semantic code search across multiple projects",
-        version: "0.1.0",
         discussion: """
         Provides MCP tools for semantic search, keyword search, file context extraction,
         and dependency graph analysis across indexed codebases.
-        """
+        """,
+        version: "0.1.0"
     )
 
     // MARK: - Configuration Options

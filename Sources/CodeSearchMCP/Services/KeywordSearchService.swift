@@ -58,13 +58,10 @@ actor KeywordSearchService: Sendable {
             "include_references": "\(includeReferences)"
         ])
 
-        // TODO: Query symbol index for matches
-        // TODO: Filter by project if specified
-        // TODO: If includeReferences, find all references
-        // TODO: Return results with context
-
-        // Placeholder implementation
-        return []
+        throw CodeSearchError.notYetImplemented(
+            feature: "Symbol keyword search with index querying",
+            issueNumber: nil
+        )
     }
 
     // MARK: - Symbol Indexing
@@ -83,10 +80,10 @@ actor KeywordSearchService: Sendable {
             "language": "\(language)"
         ])
 
-        // TODO: Parse code based on language
-        // TODO: Extract symbol definitions (functions, classes, etc.)
-        // TODO: Extract symbol references
-        // TODO: Store in symbol index
+        throw CodeSearchError.notYetImplemented(
+            feature: "Symbol indexing with language-specific parsing",
+            issueNumber: nil
+        )
     }
 
     // MARK: - Symbol Extraction (Language-Specific)
@@ -114,41 +111,26 @@ actor KeywordSearchService: Sendable {
 
     /// Extract symbols from Swift code.
     private func extractSwiftSymbols(_ content: String) -> [Symbol] {
-        // TODO: Use regex to find func, class, struct, enum, protocol definitions
-        // Example patterns:
-        // - func methodName(
-        // - class ClassName {
-        // - struct StructName {
-        // - enum EnumName {
-        // - protocol ProtocolName {
+        // Not yet implemented - requires regex pattern matching
+        // for func, class, struct, enum, protocol definitions
         return []
     }
 
     /// Extract symbols from Python code.
     private func extractPythonSymbols(_ content: String) -> [Symbol] {
-        // TODO: Use regex to find def and class definitions
-        // Example patterns:
-        // - def function_name(
-        // - class ClassName:
+        // Not yet implemented - requires regex for def and class definitions
         return []
     }
 
     /// Extract symbols from JavaScript/TypeScript code.
     private func extractJavaScriptSymbols(_ content: String) -> [Symbol] {
-        // TODO: Use regex to find function, class, const declarations
-        // Example patterns:
-        // - function functionName(
-        // - class ClassName {
-        // - const functionName =
+        // Not yet implemented - requires regex for function, class, const declarations
         return []
     }
 
     /// Extract symbols from Java code.
     private func extractJavaSymbols(_ content: String) -> [Symbol] {
-        // TODO: Use regex to find public methods and classes
-        // Example patterns:
-        // - public void methodName(
-        // - public class ClassName {
+        // Not yet implemented - requires regex for public methods and classes
         return []
     }
 
@@ -156,8 +138,7 @@ actor KeywordSearchService: Sendable {
     ///
     /// Falls back for unsupported languages.
     private func extractGenericSymbols(_ content: String) -> [Symbol] {
-        // TODO: Use simple regex patterns that might work across languages
-        // Look for common identifier patterns: camelCase, snake_case, PascalCase
+        // Not yet implemented - requires generic identifier pattern matching
         return []
     }
 
@@ -168,8 +149,10 @@ actor KeywordSearchService: Sendable {
     /// - Parameter symbols: Dictionary of symbol name to locations
     /// - Throws: If storage fails
     private func storeSymbolIndex(_ symbols: [String: [SymbolLocation]]) async throws {
-        // TODO: Serialize symbol index to JSON
-        // TODO: Write to symbol index directory
+        throw CodeSearchError.notYetImplemented(
+            feature: "Symbol index persistence to disk",
+            issueNumber: nil
+        )
     }
 
     /// Load symbol index from disk.
@@ -177,8 +160,10 @@ actor KeywordSearchService: Sendable {
     /// - Returns: Dictionary of symbol name to locations
     /// - Throws: If loading fails
     private func loadSymbolIndex() async throws -> [String: [SymbolLocation]] {
-        // TODO: Read and deserialize symbol index
-        return [:]
+        throw CodeSearchError.notYetImplemented(
+            feature: "Symbol index loading from disk",
+            issueNumber: nil
+        )
     }
 }
 
