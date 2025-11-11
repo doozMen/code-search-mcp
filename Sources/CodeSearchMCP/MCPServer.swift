@@ -89,18 +89,16 @@ actor MCPServer: Sendable {
         }
 
         // Register tool call handler
-        await server.withMethodHandler(CallTool.self) { request in
-            try await self.handleCallTool(request)
+        await server.withMethodHandler(CallTool.self) { params in
+            try await self.handleCallTool(params)
         }
 
-        // Run with stdio transport
-        let stdinFileHandle = FileHandle.standardInput
-        let stdoutFileHandle = FileHandle.standardOutput
+        // Create and start stdio transport
+        let transport = StdioTransport()
+        try await server.start(transport: transport)
 
-        try await server.run(
-            readStream: .init(fileDescriptor: stdinFileHandle.fileDescriptor),
-            writeStream: .init(fileDescriptor: stdoutFileHandle.fileDescriptor)
-        )
+        // Wait for completion
+        await server.waitUntilCompleted()
     }
 
     // MARK: - Tool Handlers
@@ -112,66 +110,106 @@ actor MCPServer: Sendable {
             Tool(
                 name: "semantic_search",
                 description: "Search for code patterns using semantic similarity with 384-dimensional embeddings",
-                inputSchema: .object(
-                    properties: [
-                        "query": .string(description: "Natural language query or code snippet to search for"),
-                        "maxResults": .integer(description: "Maximum number of results to return (default: 10)", required: false),
-                        "projectFilter": .string(description: "Optional project name to limit search scope", required: false),
-                    ],
-                    required: ["query"]
-                )
+                inputSchema: .object([
+                    "type": "object",
+                    "properties": .object([
+                        "query": .object([
+                            "type": "string",
+                            "description": "Natural language query or code snippet to search for"
+                        ]),
+                        "maxResults": .object([
+                            "type": "integer",
+                            "description": "Maximum number of results to return (default: 10)"
+                        ]),
+                        "projectFilter": .object([
+                            "type": "string",
+                            "description": "Optional project name to limit search scope"
+                        ])
+                    ]),
+                    "required": .array([.string("query")])
+                ])
             ),
 
             // Keyword search tool
             Tool(
                 name: "keyword_search",
                 description: "Search for symbols, function names, or class definitions using keyword matching",
-                inputSchema: .object(
-                    properties: [
-                        "symbol": .string(description: "Symbol name, function name, or class name to search for"),
-                        "includeReferences": .boolean(description: "Include all references to this symbol (default: false)", required: false),
-                        "projectFilter": .string(description: "Optional project name to limit search scope", required: false),
-                    ],
-                    required: ["symbol"]
-                )
+                inputSchema: .object([
+                    "type": "object",
+                    "properties": .object([
+                        "symbol": .object([
+                            "type": "string",
+                            "description": "Symbol name, function name, or class name to search for"
+                        ]),
+                        "includeReferences": .object([
+                            "type": "boolean",
+                            "description": "Include all references to this symbol (default: false)"
+                        ]),
+                        "projectFilter": .object([
+                            "type": "string",
+                            "description": "Optional project name to limit search scope"
+                        ])
+                    ]),
+                    "required": .array([.string("symbol")])
+                ])
             ),
 
             // File context tool
             Tool(
                 name: "file_context",
                 description: "Extract code context from a specific file with line range",
-                inputSchema: .object(
-                    properties: [
-                        "filePath": .string(description: "Path to the file (relative to project root)"),
-                        "startLine": .integer(description: "Start line number (1-indexed)", required: false),
-                        "endLine": .integer(description: "End line number (1-indexed, inclusive)", required: false),
-                        "contextLines": .integer(description: "Number of context lines around range (default: 3)", required: false),
-                    ],
-                    required: ["filePath"]
-                )
+                inputSchema: .object([
+                    "type": "object",
+                    "properties": .object([
+                        "filePath": .object([
+                            "type": "string",
+                            "description": "Path to the file (relative to project root)"
+                        ]),
+                        "startLine": .object([
+                            "type": "integer",
+                            "description": "Start line number (1-indexed)"
+                        ]),
+                        "endLine": .object([
+                            "type": "integer",
+                            "description": "End line number (1-indexed, inclusive)"
+                        ]),
+                        "contextLines": .object([
+                            "type": "integer",
+                            "description": "Number of context lines around range (default: 3)"
+                        ])
+                    ]),
+                    "required": .array([.string("filePath")])
+                ])
             ),
 
             // Find related files tool
             Tool(
                 name: "find_related",
                 description: "Find files that import, depend on, or are related to the given file",
-                inputSchema: .object(
-                    properties: [
-                        "filePath": .string(description: "Path to the file (relative to project root)"),
-                        "direction": .string(description: "Direction of dependency search: 'imports' (files importing this), 'imports_from' (files this imports), or 'both' (default: both)", required: false),
-                    ],
-                    required: ["filePath"]
-                )
+                inputSchema: .object([
+                    "type": "object",
+                    "properties": .object([
+                        "filePath": .object([
+                            "type": "string",
+                            "description": "Path to the file (relative to project root)"
+                        ]),
+                        "direction": .object([
+                            "type": "string",
+                            "description": "Direction of dependency search: 'imports' (files importing this), 'imports_from' (files this imports), or 'both' (default: both)"
+                        ])
+                    ]),
+                    "required": .array([.string("filePath")])
+                ])
             ),
 
             // Index status tool
             Tool(
                 name: "index_status",
                 description: "Get metadata and statistics about indexed projects and the current index",
-                inputSchema: .object(
-                    properties: [:],
-                    required: []
-                )
+                inputSchema: .object([
+                    "type": "object",
+                    "properties": .object([:])
+                ])
             ),
         ]
 
@@ -180,35 +218,35 @@ actor MCPServer: Sendable {
 
     /// Handle CallTool requests - dispatch to appropriate service.
     ///
-    /// - Parameter request: The tool call request from MCP
+    /// - Parameter params: The tool call parameters from MCP
     /// - Returns: Tool execution result
-    private func handleCallTool(_ request: CallTool.Request) async throws -> CallTool.Result {
+    private func handleCallTool(_ params: CallTool.Parameters) async throws -> CallTool.Result {
         let logger = self.logger
         logger.debug("Tool call received", metadata: [
-            "tool": "\(request.params.name)"
+            "tool": "\(params.name)"
         ])
 
-        switch request.params.name {
+        switch params.name {
         case "semantic_search":
-            return try await handleSemanticSearch(request.params.arguments ?? [:])
+            return try await handleSemanticSearch(params.arguments ?? [:])
 
         case "keyword_search":
-            return try await handleKeywordSearch(request.params.arguments ?? [:])
+            return try await handleKeywordSearch(params.arguments ?? [:])
 
         case "file_context":
-            return try await handleFileContext(request.params.arguments ?? [:])
+            return try await handleFileContext(params.arguments ?? [:])
 
         case "find_related":
-            return try await handleFindRelated(request.params.arguments ?? [:])
+            return try await handleFindRelated(params.arguments ?? [:])
 
         case "index_status":
             return try await handleIndexStatus()
 
         default:
             logger.warning("Unknown tool requested", metadata: [
-                "tool": "\(request.params.name)"
+                "tool": "\(params.name)"
             ])
-            throw MCP.Error.invalidRequest("Unknown tool: \(request.params.name)")
+            throw MCPError.invalidRequest("Unknown tool: \(params.name)")
         }
     }
 
@@ -217,13 +255,13 @@ actor MCPServer: Sendable {
     /// Handle semantic_search tool call.
     private func handleSemanticSearch(_ args: [String: Value]) async throws -> CallTool.Result {
         guard let queryValue = args["query"] else {
-            throw MCP.Error.invalidParams("Missing required parameter: query")
+            throw MCPError.invalidParams("Missing required parameter: query")
         }
         guard let query = queryValue.stringValue else {
-            throw MCP.Error.invalidParams("Parameter 'query' must be a string")
+            throw MCPError.invalidParams("Parameter 'query' must be a string")
         }
 
-        let maxResults = args["maxResults"]?.integerValue ?? 10
+        let maxResults = args["maxResults"]?.intValue ?? 10
         let projectFilter = args["projectFilter"]?.stringValue
 
         logger.debug("Semantic search", metadata: [
@@ -244,10 +282,10 @@ actor MCPServer: Sendable {
     /// Handle keyword_search tool call.
     private func handleKeywordSearch(_ args: [String: Value]) async throws -> CallTool.Result {
         guard let symbolValue = args["symbol"] else {
-            throw MCP.Error.invalidParams("Missing required parameter: symbol")
+            throw MCPError.invalidParams("Missing required parameter: symbol")
         }
         guard let symbol = symbolValue.stringValue else {
-            throw MCP.Error.invalidParams("Parameter 'symbol' must be a string")
+            throw MCPError.invalidParams("Parameter 'symbol' must be a string")
         }
 
         let includeReferences = args["includeReferences"]?.boolValue ?? false
@@ -271,15 +309,15 @@ actor MCPServer: Sendable {
     /// Handle file_context tool call.
     private func handleFileContext(_ args: [String: Value]) async throws -> CallTool.Result {
         guard let filePathValue = args["filePath"] else {
-            throw MCP.Error.invalidParams("Missing required parameter: filePath")
+            throw MCPError.invalidParams("Missing required parameter: filePath")
         }
         guard let filePath = filePathValue.stringValue else {
-            throw MCP.Error.invalidParams("Parameter 'filePath' must be a string")
+            throw MCPError.invalidParams("Parameter 'filePath' must be a string")
         }
 
-        let startLine = args["startLine"]?.integerValue
-        let endLine = args["endLine"]?.integerValue
-        let contextLines = args["contextLines"]?.integerValue ?? 3
+        let startLine = args["startLine"]?.intValue
+        let endLine = args["endLine"]?.intValue
+        let contextLines = args["contextLines"]?.intValue ?? 3
 
         logger.debug("File context requested", metadata: [
             "file_path": "\(filePath)",
@@ -300,10 +338,10 @@ actor MCPServer: Sendable {
     /// Handle find_related tool call.
     private func handleFindRelated(_ args: [String: Value]) async throws -> CallTool.Result {
         guard let filePathValue = args["filePath"] else {
-            throw MCP.Error.invalidParams("Missing required parameter: filePath")
+            throw MCPError.invalidParams("Missing required parameter: filePath")
         }
         guard let filePath = filePathValue.stringValue else {
-            throw MCP.Error.invalidParams("Parameter 'filePath' must be a string")
+            throw MCPError.invalidParams("Parameter 'filePath' must be a string")
         }
 
         let direction = args["direction"]?.stringValue ?? "both"
