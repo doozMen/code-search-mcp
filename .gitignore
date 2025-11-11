@@ -1,0 +1,45 @@
+# Swift
+.build/
+.swiftpm/
+*.xcodeproj/
+*.xcworkspace/
+.DS_Store
+*.playground
+
+# Xcode
+build/
+DerivedData/
+*.pbxuser
+*.mode1v3
+*.mode2v3
+*.perspectivev3
+*.xcbkptlist
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.env
+
+# Testing
+.coverage/
+coverage/
+.pytest_cache/
+
+# Cache
+.cache/
+*.egg-info/
+dist/
+*.whl
+
+# Agent workspace
+.agent-workspace/
+
+# macOS
+.AppleDouble
+.LSOverride
+._*
+.Spotlight-V100
+.Trashes

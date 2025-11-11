@@ -1,0 +1,16 @@
+# Swift Format Configuration for code-search-mcp
+
+# Indentation
+indentation = 4
+
+# Line length
+maxLength = 100
+
+# Imports
+sortImports = true
+
+# Trailing commas
+trailingCommas = true
+
+# Whitespace
+removeTrailingWhitespace = true
