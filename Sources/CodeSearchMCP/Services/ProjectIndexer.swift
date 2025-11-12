@@ -293,6 +293,415 @@ actor ProjectIndexer: Sendable {
 
     return "block"
   }
+
+  // MARK: - Symbol Extraction
+
+  /// Extract symbols from code content for indexing.
+  ///
+  /// Uses regex patterns to identify definitions like functions, classes, methods, etc.
+  ///
+  /// - Parameters:
+  ///   - content: Source code content
+  ///   - language: Programming language
+  ///   - filePath: Path to the file (for context)
+  /// - Returns: Array of symbol names found in the code
+  func extractSymbols(from content: String, language: String, filePath: String) -> [(
+    String, Int, Bool
+  )] {
+    // Returns tuples of (symbolName, lineNumber, isDefinition)
+    var symbols: [(String, Int, Bool)] = []
+    let lines = content.split(separator: "\n", omittingEmptySubsequences: false)
+
+    switch language.lowercased() {
+    case "swift":
+      symbols.append(contentsOf: extractSwiftSymbols(lines: lines))
+    case "python":
+      symbols.append(contentsOf: extractPythonSymbols(lines: lines))
+    case "javascript", "typescript":
+      symbols.append(contentsOf: extractJavaScriptSymbols(lines: lines))
+    case "java":
+      symbols.append(contentsOf: extractJavaSymbols(lines: lines))
+    case "go":
+      symbols.append(contentsOf: extractGoSymbols(lines: lines))
+    default:
+      symbols.append(contentsOf: extractGenericSymbols(lines: lines))
+    }
+
+    return symbols
+  }
+
+  /// Extract Swift symbols using regex patterns.
+  private func extractSwiftSymbols(lines: [Substring]) -> [(String, Int, Bool)] {
+    var symbols: [(String, Int, Bool)] = []
+
+    let patterns = [
+      // class, struct, protocol, enum, actor (definitions)
+      (
+        pattern:
+          #"^\s*(?:public\s+|private\s+|internal\s+|fileprivate\s+)?(?:final\s+)?(?:class|struct|protocol|enum|actor)\s+(\w+)"#,
+        isDefinition: true
+      ),
+      // functions (definitions)
+      (
+        pattern:
+          #"^\s*(?:public\s+|private\s+|internal\s+|fileprivate\s+)?(?:static\s+)?func\s+(\w+)"#,
+        isDefinition: true
+      ),
+      // var/let properties (definitions)
+      (
+        pattern:
+          #"^\s*(?:public\s+|private\s+|internal\s+|fileprivate\s+)?(?:static\s+)?(?:var|let)\s+(\w+)"#,
+        isDefinition: true
+      ),
+      // init methods
+      (
+        pattern: #"^\s*(?:public\s+|private\s+|internal\s+|fileprivate\s+)?init\s*\("#,
+        isDefinition: true
+      ),
+    ]
+
+    for (lineIndex, line) in lines.enumerated() {
+      let lineString = String(line)
+      for (patternString, isDefinition) in patterns {
+        if let regex = try? NSRegularExpression(pattern: patternString, options: []),
+          let match = regex.firstMatch(
+            in: lineString, options: [], range: NSRange(lineString.startIndex..., in: lineString))
+        {
+          if match.numberOfRanges > 1 {
+            let range = match.range(at: 1)
+            if let swiftRange = Range(range, in: lineString) {
+              let symbolName = String(lineString[swiftRange])
+              symbols.append((symbolName, lineIndex + 1, isDefinition))
+            }
+          } else if lineString.contains("init") {
+            // Special case for init
+            symbols.append(("init", lineIndex + 1, true))
+          }
+        }
+      }
+    }
+
+    return symbols
+  }
+
+  /// Extract Python symbols using regex patterns.
+  private func extractPythonSymbols(lines: [Substring]) -> [(String, Int, Bool)] {
+    var symbols: [(String, Int, Bool)] = []
+
+    let patterns = [
+      // class definitions
+      (pattern: #"^\s*class\s+(\w+)"#, isDefinition: true),
+      // function definitions
+      (pattern: #"^\s*def\s+(\w+)"#, isDefinition: true),
+      // async function definitions
+      (pattern: #"^\s*async\s+def\s+(\w+)"#, isDefinition: true),
+    ]
+
+    for (lineIndex, line) in lines.enumerated() {
+      let lineString = String(line)
+      for (patternString, isDefinition) in patterns {
+        if let regex = try? NSRegularExpression(pattern: patternString, options: []),
+          let match = regex.firstMatch(
+            in: lineString, options: [], range: NSRange(lineString.startIndex..., in: lineString))
+        {
+          if match.numberOfRanges > 1 {
+            let range = match.range(at: 1)
+            if let swiftRange = Range(range, in: lineString) {
+              let symbolName = String(lineString[swiftRange])
+              symbols.append((symbolName, lineIndex + 1, isDefinition))
+            }
+          }
+        }
+      }
+    }
+
+    return symbols
+  }
+
+  /// Extract JavaScript/TypeScript symbols using regex patterns.
+  private func extractJavaScriptSymbols(lines: [Substring]) -> [(String, Int, Bool)] {
+    var symbols: [(String, Int, Bool)] = []
+
+    let patterns = [
+      // class definitions
+      (pattern: #"^\s*(?:export\s+)?(?:default\s+)?class\s+(\w+)"#, isDefinition: true),
+      // function declarations
+      (pattern: #"^\s*(?:export\s+)?(?:async\s+)?function\s+(\w+)"#, isDefinition: true),
+      // const/let function expressions
+      (pattern: #"^\s*(?:export\s+)?const\s+(\w+)\s*=\s*(?:async\s+)?\("#, isDefinition: true),
+      // arrow functions
+      (pattern: #"^\s*(?:export\s+)?const\s+(\w+)\s*=\s*\([^)]*\)\s*=>"#, isDefinition: true),
+      // method definitions in classes
+      (pattern: #"^\s*(?:async\s+)?(\w+)\s*\([^)]*\)\s*\{"#, isDefinition: true),
+    ]
+
+    for (lineIndex, line) in lines.enumerated() {
+      let lineString = String(line)
+      for (patternString, isDefinition) in patterns {
+        if let regex = try? NSRegularExpression(pattern: patternString, options: []),
+          let match = regex.firstMatch(
+            in: lineString, options: [], range: NSRange(lineString.startIndex..., in: lineString))
+        {
+          if match.numberOfRanges > 1 {
+            let range = match.range(at: 1)
+            if let swiftRange = Range(range, in: lineString) {
+              let symbolName = String(lineString[swiftRange])
+              symbols.append((symbolName, lineIndex + 1, isDefinition))
+            }
+          }
+        }
+      }
+    }
+
+    return symbols
+  }
+
+  /// Extract Java symbols using regex patterns.
+  private func extractJavaSymbols(lines: [Substring]) -> [(String, Int, Bool)] {
+    var symbols: [(String, Int, Bool)] = []
+
+    let patterns = [
+      // class/interface definitions
+      (
+        pattern:
+          #"^\s*(?:public\s+|private\s+|protected\s+)?(?:abstract\s+)?(?:class|interface|enum)\s+(\w+)"#,
+        isDefinition: true
+      ),
+      // method definitions
+      (
+        pattern:
+          #"^\s*(?:public\s+|private\s+|protected\s+)?(?:static\s+)?(?:\w+)\s+(\w+)\s*\([^)]*\)"#,
+        isDefinition: true
+      ),
+    ]
+
+    for (lineIndex, line) in lines.enumerated() {
+      let lineString = String(line)
+      for (patternString, isDefinition) in patterns {
+        if let regex = try? NSRegularExpression(pattern: patternString, options: []),
+          let match = regex.firstMatch(
+            in: lineString, options: [], range: NSRange(lineString.startIndex..., in: lineString))
+        {
+          if match.numberOfRanges > 1 {
+            let range = match.range(at: 1)
+            if let swiftRange = Range(range, in: lineString) {
+              let symbolName = String(lineString[swiftRange])
+              symbols.append((symbolName, lineIndex + 1, isDefinition))
+            }
+          }
+        }
+      }
+    }
+
+    return symbols
+  }
+
+  /// Extract Go symbols using regex patterns.
+  private func extractGoSymbols(lines: [Substring]) -> [(String, Int, Bool)] {
+    var symbols: [(String, Int, Bool)] = []
+
+    let patterns = [
+      // function definitions
+      (pattern: #"^\s*func\s+(?:\([^)]+\)\s+)?(\w+)"#, isDefinition: true),
+      // type definitions
+      (pattern: #"^\s*type\s+(\w+)\s+(?:struct|interface)"#, isDefinition: true),
+      // const/var declarations
+      (pattern: #"^\s*(?:const|var)\s+(\w+)"#, isDefinition: true),
+    ]
+
+    for (lineIndex, line) in lines.enumerated() {
+      let lineString = String(line)
+      for (patternString, isDefinition) in patterns {
+        if let regex = try? NSRegularExpression(pattern: patternString, options: []),
+          let match = regex.firstMatch(
+            in: lineString, options: [], range: NSRange(lineString.startIndex..., in: lineString))
+        {
+          if match.numberOfRanges > 1 {
+            let range = match.range(at: 1)
+            if let swiftRange = Range(range, in: lineString) {
+              let symbolName = String(lineString[swiftRange])
+              symbols.append((symbolName, lineIndex + 1, isDefinition))
+            }
+          }
+        }
+      }
+    }
+
+    return symbols
+  }
+
+  /// Extract generic symbols using simple patterns.
+  private func extractGenericSymbols(lines: [Substring]) -> [(String, Int, Bool)] {
+    var symbols: [(String, Int, Bool)] = []
+
+    // Very generic pattern: look for identifier-looking names after common keywords
+    let pattern = #"^\s*(?:function|def|class|struct|enum|interface|type)\s+(\w+)"#
+
+    for (lineIndex, line) in lines.enumerated() {
+      let lineString = String(line)
+      if let regex = try? NSRegularExpression(pattern: pattern, options: []),
+        let match = regex.firstMatch(
+          in: lineString, options: [], range: NSRange(lineString.startIndex..., in: lineString))
+      {
+        if match.numberOfRanges > 1 {
+          let range = match.range(at: 1)
+          if let swiftRange = Range(range, in: lineString) {
+            let symbolName = String(lineString[swiftRange])
+            symbols.append((symbolName, lineIndex + 1, true))
+          }
+        }
+      }
+    }
+
+    return symbols
+  }
+
+  // MARK: - File Context Extraction
+
+  /// Extract code context from a file with optional line range.
+  ///
+  /// Reads the specified file and returns the requested line range with surrounding context.
+  /// If no line range is specified, returns the entire file.
+  ///
+  /// - Parameters:
+  ///   - filePath: Path to the file (absolute path or path to validate)
+  ///   - startLine: Optional starting line (1-indexed)
+  ///   - endLine: Optional ending line (1-indexed, inclusive)
+  ///   - contextLines: Number of context lines before and after range (default: 3)
+  /// - Returns: SearchResult containing the extracted context
+  /// - Throws: IndexingError if file doesn't exist or read fails
+  func extractFileContext(
+    filePath: String,
+    startLine: Int? = nil,
+    endLine: Int? = nil,
+    contextLines: Int = 3
+  ) async throws -> SearchResult {
+    logger.debug(
+      "Extracting file context",
+      metadata: [
+        "file": "\(filePath)",
+        "start": "\(startLine ?? 0)",
+        "end": "\(endLine ?? 0)",
+        "context": "\(contextLines)",
+      ])
+
+    // Validate file exists
+    guard fileManager.fileExists(atPath: filePath) else {
+      logger.warning("File not found", metadata: ["path": "\(filePath)"])
+      throw IndexingError.invalidProjectPath(filePath)
+    }
+
+    // Read file content
+    let content: String
+    do {
+      content = try String(contentsOfFile: filePath, encoding: .utf8)
+    } catch {
+      logger.error("Failed to read file", metadata: ["path": "\(filePath)", "error": "\(error)"])
+      throw IndexingError.fileReadingFailed(filePath, error)
+    }
+
+    let lines = content.split(separator: "\n", omittingEmptySubsequences: false)
+      .map { String($0) }
+    let totalLines = lines.count
+
+    // Calculate actual range with context
+    let requestedStart = startLine ?? 1
+    let requestedEnd = endLine ?? totalLines
+
+    // Validate requested range
+    guard requestedStart >= 1, requestedEnd >= requestedStart, requestedEnd <= totalLines else {
+      logger.warning(
+        "Invalid line range",
+        metadata: [
+          "start": "\(requestedStart)",
+          "end": "\(requestedEnd)",
+          "total": "\(totalLines)",
+        ])
+      throw IndexingError.invalidProjectPath(
+        "Invalid line range: \(requestedStart)-\(requestedEnd)")
+    }
+
+    // Calculate range with context (0-indexed)
+    let actualStart = max(0, requestedStart - 1 - contextLines)
+    let actualEnd = min(totalLines, requestedEnd + contextLines)
+
+    // Extract lines with line numbers
+    let extractedLines = lines[actualStart..<actualEnd].enumerated().map { idx, line in
+      let lineNum = actualStart + idx + 1
+      let marker = (lineNum >= requestedStart && lineNum <= requestedEnd) ? "→" : " "
+      return "\(marker) \(String(format: "%4d", lineNum)): \(line)"
+    }
+
+    let extractedContent = extractedLines.joined(separator: "\n")
+
+    // Detect language and extract project name
+    let language = detectLanguage(from: filePath)
+    let projectName = extractProjectName(from: filePath)
+
+    logger.debug(
+      "File context extracted",
+      metadata: [
+        "total_lines": "\(totalLines)",
+        "extracted_lines": "\(extractedLines.count)",
+        "language": "\(language)",
+      ])
+
+    // Return as SearchResult
+    return SearchResult.fileContext(
+      projectName: projectName,
+      filePath: filePath,
+      language: language,
+      startLine: actualStart + 1,
+      endLine: actualEnd,
+      content: extractedContent
+    )
+  }
+
+  /// Detect programming language from file extension.
+  ///
+  /// - Parameter filePath: Path to file
+  /// - Returns: Language name or "Unknown"
+  private func detectLanguage(from filePath: String) -> String {
+    let ext = (filePath as NSString).pathExtension.lowercased()
+    return supportedExtensions[ext] ?? "Unknown"
+  }
+
+  /// Extract project name from file path.
+  ///
+  /// Uses heuristics to find project root based on common markers.
+  ///
+  /// - Parameter filePath: Full file path
+  /// - Returns: Best guess at project name
+  private func extractProjectName(from filePath: String) -> String {
+    // Look for common project root indicators
+    let components = (filePath as NSString).pathComponents
+    let projectMarkers = [
+      "Package.swift",
+      ".git",
+      "package.json",
+      "pom.xml",
+      "build.gradle",
+      "Cargo.toml",
+    ]
+
+    // Try to find project root by walking up the path
+    for i in (0..<components.count).reversed() {
+      let pathUpToIndex = Array(components[0...i]).joined(separator: "/")
+      for marker in projectMarkers {
+        let markerPath = (pathUpToIndex as NSString).appendingPathComponent(marker)
+        if fileManager.fileExists(atPath: markerPath) {
+          return components[i]
+        }
+      }
+    }
+
+    // Fallback: use the topmost directory after root
+    if components.count > 1 {
+      return components[1]
+    }
+
+    return "Unknown"
+  }
 }
 
 // MARK: - Error Types

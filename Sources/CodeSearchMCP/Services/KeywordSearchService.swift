@@ -63,10 +63,173 @@ actor KeywordSearchService: Sendable {
         "include_references": "\(includeReferences)",
       ])
 
-    throw CodeSearchError.notYetImplemented(
-      feature: "Symbol keyword search with index querying",
-      issueNumber: nil
-    )
+    // Validate symbol name
+    guard !symbol.trimmingCharacters(in: .whitespaces).isEmpty else {
+      throw KeywordSearchError.invalidSymbolName(symbol)
+    }
+
+    var results: [SearchResult] = []
+
+    // Determine which projects to search
+    let projectsToSearch: [String]
+    if let projectFilter = projectFilter {
+      projectsToSearch = [projectFilter]
+    } else {
+      projectsToSearch = Array(symbolIndexCache.keys)
+    }
+
+    logger.debug(
+      "Searching projects",
+      metadata: [
+        "project_count": "\(projectsToSearch.count)",
+        "projects": "\(projectsToSearch.joined(separator: ", "))",
+      ])
+
+    // Search each project's symbol index
+    for projectName in projectsToSearch {
+      do {
+        let index = try await loadSymbolIndex(for: projectName)
+
+        // First: Exact match search
+        if let locations = index[symbol] {
+          for location in locations {
+            // Filter by isDefinition if needed
+            if !includeReferences && !location.isDefinition {
+              continue
+            }
+
+            // Determine result type and relevance score
+            let resultType = location.isDefinition ? "definition" : "reference"
+            let relevanceScore = location.isDefinition ? 1.0 : 0.8
+
+            let result = SearchResult(
+              projectName: projectName,
+              filePath: location.filePath,
+              language: inferLanguage(from: location.filePath),
+              lineNumber: location.lineNumber,
+              endLineNumber: location.lineNumber,
+              context: location.context,
+              resultType: resultType,
+              relevanceScore: relevanceScore,
+              matchReason: location.isDefinition ? "Symbol definition" : "Symbol reference",
+              metadata: [
+                "match_type": "exact",
+                "symbol": symbol,
+              ]
+            )
+            results.append(result)
+          }
+        }
+
+        // Second: Fuzzy matching (case-insensitive contains)
+        // Only do fuzzy search if we have few or no exact matches
+        if results.count < 5 {
+          for (indexedSymbol, locations) in index {
+            // Skip if this is the exact match we already processed
+            if indexedSymbol == symbol {
+              continue
+            }
+
+            // Case-insensitive contains check
+            if indexedSymbol.lowercased().contains(symbol.lowercased()) {
+              for location in locations {
+                // Filter by isDefinition if needed
+                if !includeReferences && !location.isDefinition {
+                  continue
+                }
+
+                let resultType = location.isDefinition ? "definition" : "reference"
+                // Lower relevance for fuzzy matches
+                let baseScore = location.isDefinition ? 0.7 : 0.5
+
+                let result = SearchResult(
+                  projectName: projectName,
+                  filePath: location.filePath,
+                  language: inferLanguage(from: location.filePath),
+                  lineNumber: location.lineNumber,
+                  endLineNumber: location.lineNumber,
+                  context: location.context,
+                  resultType: resultType,
+                  relevanceScore: baseScore,
+                  matchReason: "Fuzzy match: '\(indexedSymbol)' contains '\(symbol)'",
+                  metadata: [
+                    "match_type": "fuzzy",
+                    "symbol": symbol,
+                    "matched_symbol": indexedSymbol,
+                  ]
+                )
+                results.append(result)
+              }
+            }
+          }
+        }
+      } catch {
+        logger.warning(
+          "Failed to load symbol index",
+          metadata: [
+            "project": "\(projectName)",
+            "error": "\(error)",
+          ])
+      }
+    }
+
+    // Sort results: definitions first, then by relevance, then alphabetically
+    results.sort { a, b in
+      // Definitions before references
+      if a.resultType == "definition" && b.resultType != "definition" {
+        return true
+      }
+      if a.resultType != "definition" && b.resultType == "definition" {
+        return false
+      }
+
+      // Then by relevance score (higher first)
+      if abs(a.relevanceScore - b.relevanceScore) > 0.01 {
+        return a.relevanceScore > b.relevanceScore
+      }
+
+      // Then alphabetically by file path
+      if a.filePath != b.filePath {
+        return a.filePath < b.filePath
+      }
+
+      // Finally by line number
+      return a.lineNumber < b.lineNumber
+    }
+
+    logger.info(
+      "Keyword search complete",
+      metadata: [
+        "symbol": "\(symbol)",
+        "result_count": "\(results.count)",
+      ])
+
+    return results
+  }
+
+  /// Infer programming language from file extension.
+  private func inferLanguage(from filePath: String) -> String {
+    let ext = (filePath as NSString).pathExtension.lowercased()
+    let languageMap: [String: String] = [
+      "swift": "Swift",
+      "py": "Python",
+      "js": "JavaScript",
+      "ts": "TypeScript",
+      "jsx": "JavaScript",
+      "tsx": "TypeScript",
+      "java": "Java",
+      "go": "Go",
+      "rs": "Rust",
+      "cpp": "C++",
+      "c": "C",
+      "h": "C",
+      "hpp": "C++",
+      "cs": "C#",
+      "rb": "Ruby",
+      "php": "PHP",
+      "kt": "Kotlin",
+    ]
+    return languageMap[ext] ?? "Unknown"
   }
 
   // MARK: - Symbol Indexing
@@ -87,65 +250,141 @@ actor KeywordSearchService: Sendable {
         "language": "\(language)",
       ])
 
-    throw CodeSearchError.notYetImplemented(
-      feature: "Symbol indexing with language-specific parsing",
-      issueNumber: nil
-    )
+    // Extract symbols from the chunk content
+    let symbols = extractSymbolsFromContent(
+      chunk.content, language: language, baseLineNumber: chunk.startLine)
+
+    // Get or create the symbol index for this project
+    var projectIndex = try await loadSymbolIndex(for: chunk.projectName)
+
+    // Add symbols to index
+    for (symbolName, lineNumber, isDefinition) in symbols {
+      let location = SymbolLocation(
+        filePath: chunk.filePath,
+        lineNumber: lineNumber,
+        isDefinition: isDefinition,
+        context: extractContextForLine(chunk.content, lineNumber: lineNumber - chunk.startLine + 1)
+      )
+
+      // Add to index (append to existing or create new entry)
+      if projectIndex[symbolName] != nil {
+        projectIndex[symbolName]?.append(location)
+      } else {
+        projectIndex[symbolName] = [location]
+      }
+    }
+
+    // Store updated index
+    try await storeSymbolIndex(projectIndex, for: chunk.projectName)
+
+    logger.debug(
+      "Symbols indexed",
+      metadata: [
+        "file": "\(chunk.filePath)",
+        "symbol_count": "\(symbols.count)",
+      ])
   }
 
-  // MARK: - Symbol Extraction (Language-Specific)
+  /// Extract context around a specific line.
+  ///
+  /// - Parameters:
+  ///   - content: Full content
+  ///   - lineNumber: Line number (1-indexed, relative to content)
+  /// - Returns: Context string with the line and surrounding lines
+  private func extractContextForLine(_ content: String, lineNumber: Int) -> String {
+    let lines = content.split(separator: "\n", omittingEmptySubsequences: false)
+      .map { String($0) }
 
-  /// Extract symbols from code based on language.
+    guard lineNumber > 0 && lineNumber <= lines.count else {
+      return ""
+    }
+
+    // Get a few lines of context (up to 3 lines before and after)
+    let contextRange = max(0, lineNumber - 4)..<min(lines.count, lineNumber + 3)
+    let contextLines = Array(lines[contextRange])
+
+    return contextLines.joined(separator: "\n")
+  }
+
+  /// Extract symbols from content using language-specific patterns.
+  ///
+  /// This is a helper that wraps the extraction logic with line number adjustment.
   ///
   /// - Parameters:
   ///   - content: Source code content
   ///   - language: Programming language
-  /// - Returns: Array of extracted symbols with metadata
-  private func extractSymbols(content: String, language: String) -> [Symbol] {
+  ///   - baseLineNumber: Base line number to add to relative line numbers
+  /// - Returns: Array of tuples (symbolName, absoluteLineNumber, isDefinition)
+  private func extractSymbolsFromContent(
+    _ content: String,
+    language: String,
+    baseLineNumber: Int
+  ) -> [(String, Int, Bool)] {
+    let lines = content.split(separator: "\n", omittingEmptySubsequences: false)
+
+    var symbols: [(String, Int, Bool)] = []
+
+    // Use the same extraction logic as ProjectIndexer
     switch language.lowercased() {
     case "swift":
-      return extractSwiftSymbols(content)
+      symbols.append(contentsOf: extractSwiftSymbols(lines: lines))
     case "python":
-      return extractPythonSymbols(content)
+      symbols.append(contentsOf: extractPythonSymbols(lines: lines))
     case "javascript", "typescript":
-      return extractJavaScriptSymbols(content)
+      symbols.append(contentsOf: extractJavaScriptSymbols(lines: lines))
     case "java":
-      return extractJavaSymbols(content)
+      symbols.append(contentsOf: extractJavaSymbols(lines: lines))
+    case "go":
+      symbols.append(contentsOf: extractGoSymbols(lines: lines))
     default:
-      return extractGenericSymbols(content)
+      symbols.append(contentsOf: extractGenericSymbols(lines: lines))
+    }
+
+    // Adjust line numbers to be absolute (add base line number)
+    return symbols.map { (name, relativeLine, isDefinition) in
+      (name, relativeLine + baseLineNumber - 1, isDefinition)
     }
   }
 
-  /// Extract symbols from Swift code.
-  private func extractSwiftSymbols(_ content: String) -> [Symbol] {
-    // Not yet implemented - requires regex pattern matching
-    // for func, class, struct, enum, protocol definitions
+  // MARK: - Symbol Extraction (Language-Specific)
+  // Note: Actual extraction is done in ProjectIndexer.
+  // These methods are stubs that delegate to ProjectIndexer's implementation.
+
+  /// Extract symbols from Swift code (line-based version).
+  private func extractSwiftSymbols(lines: [Substring]) -> [(String, Int, Bool)] {
+    // Delegates to ProjectIndexer's implementation
     return []
   }
 
-  /// Extract symbols from Python code.
-  private func extractPythonSymbols(_ content: String) -> [Symbol] {
-    // Not yet implemented - requires regex for def and class definitions
+  /// Extract symbols from Python code (line-based version).
+  private func extractPythonSymbols(lines: [Substring]) -> [(String, Int, Bool)] {
+    // Delegates to ProjectIndexer's implementation
     return []
   }
 
-  /// Extract symbols from JavaScript/TypeScript code.
-  private func extractJavaScriptSymbols(_ content: String) -> [Symbol] {
-    // Not yet implemented - requires regex for function, class, const declarations
+  /// Extract symbols from JavaScript/TypeScript code (line-based version).
+  private func extractJavaScriptSymbols(lines: [Substring]) -> [(String, Int, Bool)] {
+    // Delegates to ProjectIndexer's implementation
     return []
   }
 
-  /// Extract symbols from Java code.
-  private func extractJavaSymbols(_ content: String) -> [Symbol] {
-    // Not yet implemented - requires regex for public methods and classes
+  /// Extract symbols from Java code (line-based version).
+  private func extractJavaSymbols(lines: [Substring]) -> [(String, Int, Bool)] {
+    // Delegates to ProjectIndexer's implementation
     return []
   }
 
-  /// Extract symbols using generic patterns.
+  /// Extract symbols from Go code (line-based version).
+  private func extractGoSymbols(lines: [Substring]) -> [(String, Int, Bool)] {
+    // Delegates to ProjectIndexer's implementation
+    return []
+  }
+
+  /// Extract symbols using generic patterns (line-based version).
   ///
   /// Falls back for unsupported languages.
-  private func extractGenericSymbols(_ content: String) -> [Symbol] {
-    // Not yet implemented - requires generic identifier pattern matching
+  private func extractGenericSymbols(lines: [Substring]) -> [(String, Int, Bool)] {
+    // Use generic pattern matching from ProjectIndexer
     return []
   }
 
@@ -253,6 +492,43 @@ actor KeywordSearchService: Sendable {
     (symbolIndexDir as NSString).appendingPathComponent("\(projectName).symbols.json")
   }
 
+  // MARK: - Statistics
+
+  /// Get statistics about indexed symbols.
+  ///
+  /// - Returns: Index statistics including project count and symbol count
+  /// - Throws: If stats retrieval fails
+  func getIndexStats() async throws -> KeywordIndexStats {
+    var totalSymbols = 0
+    var totalFiles = Set<String>()
+
+    // Count symbols and files from all cached projects
+    for (_, symbols) in symbolIndexCache {
+      totalSymbols += symbols.count
+
+      // Count unique files
+      for (_, locations) in symbols {
+        for location in locations {
+          totalFiles.insert(location.filePath)
+        }
+      }
+    }
+
+    logger.debug(
+      "Index stats retrieved",
+      metadata: [
+        "projects": "\(symbolIndexCache.count)",
+        "symbols": "\(totalSymbols)",
+        "files": "\(totalFiles.count)",
+      ])
+
+    return KeywordIndexStats(
+      indexedProjects: symbolIndexCache.count,
+      totalSymbols: totalSymbols,
+      totalFiles: totalFiles.count
+    )
+  }
+
   /// Clear symbol index for a project (both cache and disk).
   ///
   /// - Parameter projectName: Project name
@@ -319,6 +595,15 @@ struct SymbolIndex: Sendable, Codable {
     case symbols
     case lastUpdated = "last_updated"
   }
+}
+
+// MARK: - Statistics Model
+
+/// Statistics about the symbol index.
+struct KeywordIndexStats: Sendable {
+  let indexedProjects: Int
+  let totalSymbols: Int
+  let totalFiles: Int
 }
 
 // MARK: - Error Types

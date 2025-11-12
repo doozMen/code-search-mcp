@@ -59,10 +59,78 @@ actor CodeMetadataExtractor: Sendable {
         "direction": "\(direction)",
       ])
 
-    throw CodeSearchError.notYetImplemented(
-      feature: "Dependency graph traversal for related files",
-      issueNumber: nil
-    )
+    // Extract project name from file path
+    let projectName = extractProjectNameFromPath(filePath)
+
+    // Load dependency graph for project
+    let graph = try await getDependencyGraph(for: projectName)
+
+    var relatedFiles: [String] = []
+
+    // Collect related files based on direction
+    switch direction.lowercased() {
+    case "imports":
+      // Files that this file imports
+      relatedFiles = graph.getImports(from: filePath)
+
+    case "imports_from", "imported_by":
+      // Files that import this file
+      relatedFiles = graph.getImporters(of: filePath)
+
+    case "both":
+      // Both directions
+      let imports = graph.getImports(from: filePath)
+      let importers = graph.getImporters(of: filePath)
+      relatedFiles = Array(Set(imports + importers)).sorted()
+
+    default:
+      logger.warning("Unknown direction", metadata: ["direction": "\(direction)"])
+      throw MetadataError.invalidFilePath("Unknown direction: \(direction)")
+    }
+
+    logger.info(
+      "Found related files",
+      metadata: [
+        "file": "\(filePath)",
+        "direction": "\(direction)",
+        "count": "\(relatedFiles.count)",
+      ])
+
+    return relatedFiles
+  }
+
+  /// Extract project name from file path using simple heuristics.
+  ///
+  /// - Parameter filePath: Full file path
+  /// - Returns: Best guess at project name
+  private func extractProjectNameFromPath(_ filePath: String) -> String {
+    let components = (filePath as NSString).pathComponents
+    let projectMarkers = [
+      "Package.swift",
+      ".git",
+      "package.json",
+      "pom.xml",
+      "build.gradle",
+      "Cargo.toml",
+    ]
+
+    // Try to find project root by walking up the path
+    for i in (0..<components.count).reversed() {
+      let pathUpToIndex = Array(components[0...i]).joined(separator: "/")
+      for marker in projectMarkers {
+        let markerPath = (pathUpToIndex as NSString).appendingPathComponent(marker)
+        if fileManager.fileExists(atPath: markerPath) {
+          return components[i]
+        }
+      }
+    }
+
+    // Fallback: use the topmost directory after root
+    if components.count > 1 {
+      return components[1]
+    }
+
+    return "Unknown"
   }
 
   /// Extract dependencies from a code file.

@@ -191,6 +191,54 @@ actor EmbeddingService: Sendable {
       throw EmbeddingError.cacheClearingFailed(error)
     }
   }
+
+  // MARK: - Statistics
+
+  /// Get cache statistics.
+  ///
+  /// - Returns: Cache statistics including hit rate and total embeddings
+  /// - Throws: If stats retrieval fails
+  func getCacheStats() async throws -> EmbeddingCacheStats {
+    // Count cached embeddings
+    let cacheFiles: [String]
+    if let enumerator = fileManager.enumerator(atPath: embeddingsCacheDir) {
+      cacheFiles = enumerator.allObjects as? [String] ?? []
+    } else {
+      cacheFiles = []
+    }
+
+    let totalEmbeddings = cacheFiles.filter { $0.hasSuffix(".embedding.json") }.count
+
+    logger.debug(
+      "Cache stats retrieved",
+      metadata: [
+        "total_embeddings": "\(totalEmbeddings)"
+      ])
+
+    // For now, return stats without hit/miss tracking
+    // TODO: Add actual hit/miss tracking in future
+    return EmbeddingCacheStats(
+      indexPath: embeddingsCacheDir,
+      totalEmbeddings: totalEmbeddings,
+      cacheHits: 0,
+      cacheMisses: 0
+    )
+  }
+}
+
+// MARK: - Statistics Model
+
+/// Statistics about the embedding cache.
+struct EmbeddingCacheStats: Sendable {
+  let indexPath: String
+  let totalEmbeddings: Int
+  let cacheHits: Int
+  let cacheMisses: Int
+
+  var hitRate: Double {
+    let total = cacheHits + cacheMisses
+    return total > 0 ? Double(cacheHits) / Double(total) : 0.0
+  }
 }
 
 // MARK: - Error Types

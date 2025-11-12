@@ -344,14 +344,36 @@ actor MCPServer: Sendable {
         "file_path": "\(filePath)",
         "start_line": "\(startLine ?? 0)",
         "end_line": "\(endLine ?? 0)",
+        "context_lines": "\(contextLines)",
       ])
 
-    // TODO: Implement file context extraction
-    let contextText = "File context extraction not yet implemented"
+    // Delegate to project indexer for file context extraction
+    let result = try await projectIndexer.extractFileContext(
+      filePath: filePath,
+      startLine: startLine,
+      endLine: endLine,
+      contextLines: contextLines
+    )
+
+    // Format the result
+    let output = """
+      File: \(result.filePath)
+      Language: \(result.language)
+      Lines: \(result.lineNumber)-\(result.endLineNumber)
+
+      \(result.context)
+      """
+
+    logger.info(
+      "File context extracted",
+      metadata: [
+        "file": "\(result.filePath)",
+        "lines": "\(result.lineCount)",
+      ])
 
     return CallTool.Result(
       content: [
-        .text(contextText)
+        .text(output)
       ]
     )
   }
@@ -392,22 +414,42 @@ actor MCPServer: Sendable {
   private func handleIndexStatus() async throws -> CallTool.Result {
     logger.debug("Index status requested")
 
-    let statusText = """
-      Index Status
-      ============
+    // Get metadata from services
+    let embeddingStats = try await embeddingService.getCacheStats()
+    let keywordStats = try await keywordSearchService.getIndexStats()
 
-      Indexed Projects: 0
-      Total Code Chunks: 0
-      Total Files: 0
-      Embedding Model: BERT (384-dimensional)
-      Index Path: ~/.cache/code-search-mcp
+    // Build status report
+    let statusLines: [String] = [
+      "Index Status",
+      "============",
+      "",
+      "Embedding Cache:",
+      "  - Total embeddings: \(embeddingStats.totalEmbeddings)",
+      "  - Cache hits: \(embeddingStats.cacheHits)",
+      "  - Cache misses: \(embeddingStats.cacheMisses)",
+      "  - Hit rate: \(String(format: "%.1f%%", embeddingStats.hitRate * 100))",
+      "",
+      "Symbol Index:",
+      "  - Indexed projects: \(keywordStats.indexedProjects)",
+      "  - Total symbols: \(keywordStats.totalSymbols)",
+      "  - Total files: \(keywordStats.totalFiles)",
+      "",
+      "Configuration:",
+      "  - Embedding model: BERT (384-dimensional)",
+      "  - Index path: \(embeddingStats.indexPath)",
+      "  - Status: Active",
+    ]
 
-      Status: Initializing
-      """
+    logger.info(
+      "Index status retrieved",
+      metadata: [
+        "embeddings": "\(embeddingStats.totalEmbeddings)",
+        "symbols": "\(keywordStats.totalSymbols)",
+      ])
 
     return CallTool.Result(
       content: [
-        .text(statusText)
+        .text(statusLines.joined(separator: "\n"))
       ]
     )
   }
