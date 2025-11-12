@@ -16,82 +16,87 @@ import MCP
 /// - Index metadata and statistics
 @main
 struct CodeSearchMCP: AsyncParsableCommand {
-    static let configuration = CommandConfiguration(
-        commandName: "code-search-mcp",
-        abstract: "MCP server for semantic code search across multiple projects",
-        discussion: """
-        Provides MCP tools for semantic search, keyword search, file context extraction,
-        and dependency graph analysis across indexed codebases.
-        """,
-        version: "0.1.0"
-    )
+  static let configuration = CommandConfiguration(
+    commandName: "code-search-mcp",
+    abstract: "MCP server for semantic code search across multiple projects",
+    discussion: """
+      Provides MCP tools for semantic search, keyword search, file context extraction,
+      and dependency graph analysis across indexed codebases.
+      """,
+    version: "0.1.0"
+  )
 
-    // MARK: - Configuration Options
+  // MARK: - Configuration Options
 
-    /// Log level for debug output (debug, info, warn, error).
-    @Option(
-        name: .long,
-        help: "Log level for debug output",
-        completion: .list(["debug", "info", "warn", "error"])
-    )
-    var logLevel: String = "info"
+  /// Log level for debug output (debug, info, warn, error).
+  @Option(
+    name: .long,
+    help: "Log level for debug output",
+    completion: .list(["debug", "info", "warn", "error"])
+  )
+  var logLevel: String = "info"
 
-    /// Path to the index directory where embeddings and metadata are stored.
-    @Option(
-        name: .long,
-        help: "Path to index directory for embeddings and metadata"
-    )
-    var indexPath: String = "\(FileManager.default.homeDirectoryForCurrentUser.path)/.cache/code-search-mcp"
+  /// Path to the index directory where embeddings and metadata are stored.
+  @Option(
+    name: .long,
+    help: "Path to index directory for embeddings and metadata"
+  )
+  var indexPath: String =
+    "\(FileManager.default.homeDirectoryForCurrentUser.path)/.cache/code-search-mcp"
 
-    /// Optional project directories to index (can be specified multiple times).
-    @Option(
-        name: .long,
-        help: "Project directory to index (can be specified multiple times)"
-    )
-    var projectPaths: [String] = []
+  /// Optional project directories to index (can be specified multiple times).
+  @Option(
+    name: .long,
+    help: "Project directory to index (can be specified multiple times)"
+  )
+  var projectPaths: [String] = []
 
-    // MARK: - Async Command Execution
+  // MARK: - Async Command Execution
 
-    func run() async throws {
-        // Configure logging system
-        configureLogging()
+  func run() async throws {
+    // Configure logging system
+    configureLogging()
 
-        let logger = Logger(label: "code-search-mcp")
-        logger.info("Starting code-search-mcp server", metadata: [
-            "version": "0.1.0",
-            "log_level": "\(logLevel)",
-            "index_path": "\(indexPath)",
+    let logger = Logger(label: "code-search-mcp")
+    logger.info(
+      "Starting code-search-mcp server",
+      metadata: [
+        "version": "0.1.0",
+        "log_level": "\(logLevel)",
+        "index_path": "\(indexPath)",
+      ])
+
+    // Initialize MCP server
+    do {
+      let server = try await MCPServer(
+        indexPath: indexPath,
+        projectPaths: projectPaths
+      )
+      try await server.run()
+    } catch {
+      logger.error(
+        "Failed to start server",
+        metadata: [
+          "error": "\(error)"
         ])
-
-        // Initialize MCP server
-        do {
-            let server = try await MCPServer(
-                indexPath: indexPath,
-                projectPaths: projectPaths
-            )
-            try await server.run()
-        } catch {
-            logger.error("Failed to start server", metadata: [
-                "error": "\(error)"
-            ])
-            throw ExitCode.failure
-        }
+      throw ExitCode.failure
     }
+  }
 
-    // MARK: - Private Methods
+  // MARK: - Private Methods
 
-    /// Configure the logging system with the specified log level.
-    private func configureLogging() {
-        LoggingSystem.bootstrap { label in
-            var handler = StreamLogHandler.standardError(label: label)
+  /// Configure the logging system with the specified log level.
+  private func configureLogging() {
+    LoggingSystem.bootstrap { label in
+      var handler = StreamLogHandler.standardError(label: label)
 
-            if let logLevelValue = Logger.Level(rawValue: logLevel) {
-                handler.logLevel = logLevelValue
-            } else {
-                handler.logLevel = .info
-            }
+      if let logLevelValue = Logger.Level(rawValue: logLevel) {
+        handler.logLevel = logLevelValue
+      } else {
+        handler.logLevel = .info
+      }
 
-            return handler
-        }
+      return handler
     }
+  }
 }

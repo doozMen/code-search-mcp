@@ -17,26 +17,62 @@ An MCP server for semantic and keyword-based code search across multiple project
 
 - macOS 15.0+
 - Swift 6.0+
+- Python 3.8+ with pip
 - Xcode 16.0+ (for development)
 
 ## Installation
 
-### From Source
+### Option 1: From PromptPing Marketplace (Recommended)
 
 ```bash
-git clone https://github.com/yourusername/code-search-mcp.git
+# Add marketplace
+/plugin marketplace add /Users/stijnwillems/Developer/promptping-marketplace
+
+# Install plugin
+/plugin install code-search-mcp
+
+# Restart Claude Code
+```
+
+### Option 2: From Source
+
+```bash
+git clone https://github.com/doozMen/code-search-mcp.git
 cd code-search-mcp
+
+# Install Python dependencies (required for BERT embeddings)
+./Scripts/install_python_deps.sh
+
+# Build and install
 ./install.sh
 ```
 
-### Manual Build
+### Option 3: Manual Build
 
 ```bash
+# Install Python dependencies first
+./Scripts/install_python_deps.sh
+
+# Build and install
 swift build -c release
 swift package experimental-install
 ```
 
 ## Configuration
+
+### For Marketplace Installation (Option 1)
+
+The plugin is automatically configured when installed from the marketplace. Ensure your `~/.claude/settings.json` includes the PATH:
+
+```json
+{
+  "env": {
+    "PATH": "/Users/<YOUR_USERNAME>/.swiftpm/bin:/usr/local/bin:/usr/bin:/bin"
+  }
+}
+```
+
+### For Manual Installation (Options 2 & 3)
 
 Add to Claude Desktop config (`~/Library/Application Support/Claude/claude_desktop_config.json`):
 

@@ -295,20 +295,23 @@ code-search-mcp --log-level debug
 
 ## Implementation Status
 
-**Phase 1 (In Progress)**:
+**Phase 1 (Complete)** ✅:
 - [x] Project structure and Package.swift
 - [x] Service skeleton files
 - [x] Model definitions
 - [x] MCP server initialization
-- [ ] Embedding service BERT integration
-- [ ] Vector search implementation
-- [ ] Index persistence (JSON/SQLite)
+- [x] Embedding service BERT integration (Python bridge)
+- [x] Vector search implementation (cosine similarity)
+- [x] Index persistence (JSON-based)
+- [x] Code chunk extraction (50-line chunks)
+- [x] Symbol index persistence
+- [x] Dependency graph persistence
 
-**Phase 2 (Planned)**:
-- Semantic search with ranking
-- Keyword search with symbol indexing
-- File context extraction
-- Dependency graph building
+**Phase 2 (In Progress)**:
+- [x] Semantic search with ranking (complete)
+- [ ] Keyword search with symbol indexing (persistence complete, search TODO)
+- [ ] File context extraction (stub exists)
+- [x] Dependency graph building (complete)
 
 See ARCHITECTURE.md and DEVELOPMENT.md for detailed implementation plans.
 

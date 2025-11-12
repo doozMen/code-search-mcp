@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "code-search-mcp": {
+      "command": "code-search-mcp",
+      "args": ["--log-level", "info"]
+    }
+  }
+}
