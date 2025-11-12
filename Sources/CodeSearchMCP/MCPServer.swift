@@ -45,11 +45,14 @@ actor MCPServer: Sendable {
     )
 
     // Initialize services
-    self.projectIndexer = ProjectIndexer(indexPath: indexPath)
     self.embeddingService = EmbeddingService(indexPath: indexPath)
     self.vectorSearchService = VectorSearchService(indexPath: indexPath)
     self.keywordSearchService = KeywordSearchService(indexPath: indexPath)
     self.codeMetadataExtractor = CodeMetadataExtractor(indexPath: indexPath)
+    self.projectIndexer = ProjectIndexer(
+      indexPath: indexPath,
+      keywordSearchService: self.keywordSearchService
+    )
 
     self.logger.info(
       "MCP server initialized",

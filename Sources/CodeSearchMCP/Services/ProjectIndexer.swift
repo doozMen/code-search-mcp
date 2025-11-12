@@ -14,6 +14,7 @@ actor ProjectIndexer: Sendable {
   private let indexPath: String
   private let logger: Logger
   private let fileManager = FileManager.default
+  private let keywordSearchService: KeywordSearchService?
 
   /// File extensions to index by language
   private let supportedExtensions: [String: String] = [
@@ -38,8 +39,9 @@ actor ProjectIndexer: Sendable {
 
   // MARK: - Initialization
 
-  init(indexPath: String) {
+  init(indexPath: String, keywordSearchService: KeywordSearchService? = nil) {
     self.indexPath = indexPath
+    self.keywordSearchService = keywordSearchService
     self.logger = Logger(label: "project-indexer")
 
     // Ensure index directory exists
@@ -90,6 +92,14 @@ actor ProjectIndexer: Sendable {
       do {
         let chunks = try extractCodeChunks(from: filePath, projectName: projectName)
         totalChunks += chunks.count
+
+        // Index symbols from chunks if service available
+        if let keywordService = keywordSearchService {
+          for chunk in chunks {
+            try await keywordService.indexSymbols(in: chunk, language: chunk.language)
+          }
+        }
+
         logger.debug(
           "Extracted chunks",
           metadata: [
