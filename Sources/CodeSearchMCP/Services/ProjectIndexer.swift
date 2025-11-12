@@ -14,6 +14,7 @@ actor ProjectIndexer: Sendable {
   private let indexPath: String
   private let logger: Logger
   private let fileManager = FileManager.default
+  private let embeddingService: EmbeddingService
 
   /// File extensions to index by language
   private let supportedExtensions: [String: String] = [
@@ -38,8 +39,9 @@ actor ProjectIndexer: Sendable {
 
   // MARK: - Initialization
 
-  init(indexPath: String) {
+  init(indexPath: String, embeddingService: EmbeddingService) {
     self.indexPath = indexPath
+    self.embeddingService = embeddingService
     self.logger = Logger(label: "project-indexer")
 
     // Ensure index directory exists
@@ -86,9 +88,38 @@ actor ProjectIndexer: Sendable {
 
     // Extract code chunks from each file
     var totalChunks = 0
+    var chunksWithEmbeddings: [CodeChunk] = []
+
     for filePath in sourceFiles {
       do {
-        let chunks = try extractCodeChunks(from: filePath, projectName: projectName)
+        var chunks = try extractCodeChunks(from: filePath, projectName: projectName)
+
+        // Generate embeddings for each chunk
+        for i in 0..<chunks.count {
+          do {
+            let embedding = try await embeddingService.generateEmbedding(for: chunks[i].content)
+            chunks[i] = chunks[i].withEmbedding(embedding)
+
+            logger.debug(
+              "Generated embedding for chunk",
+              metadata: [
+                "file": "\((filePath as NSString).lastPathComponent)",
+                "chunk_id": "\(chunks[i].id)",
+                "embedding_size": "\(embedding.count)",
+              ])
+          } catch {
+            logger.warning(
+              "Failed to generate embedding for chunk, skipping",
+              metadata: [
+                "file": "\(filePath)",
+                "chunk_id": "\(chunks[i].id)",
+                "error": "\(error)",
+              ])
+            // Continue without embedding for this chunk
+          }
+        }
+
+        chunksWithEmbeddings.append(contentsOf: chunks)
         totalChunks += chunks.count
 
         logger.debug(
@@ -106,6 +137,9 @@ actor ProjectIndexer: Sendable {
           ])
       }
     }
+
+    // Save chunks to disk for vector search
+    try await saveChunks(chunksWithEmbeddings, projectName: projectName)
 
     logger.info(
       "Project indexing complete",
@@ -440,6 +474,57 @@ actor ProjectIndexer: Sendable {
     }
 
     return "Unknown"
+  }
+
+  // MARK: - Chunk Persistence
+
+  /// Save code chunks to disk for vector search.
+  ///
+  /// Stores chunks in project-specific directory for efficient loading.
+  ///
+  /// - Parameters:
+  ///   - chunks: Code chunks to save
+  ///   - projectName: Project name for organization
+  /// - Throws: If file writing fails
+  private func saveChunks(_ chunks: [CodeChunk], projectName: String) async throws {
+    let chunksDir = (indexPath as NSString).appendingPathComponent("chunks")
+    let projectChunksDir = (chunksDir as NSString).appendingPathComponent(projectName)
+
+    // Create project chunks directory
+    try fileManager.createDirectory(
+      atPath: projectChunksDir,
+      withIntermediateDirectories: true,
+      attributes: nil
+    )
+
+    // Save each chunk as a separate JSON file
+    for chunk in chunks {
+      let chunkFileName = "\(chunk.id).json"
+      let chunkFilePath = (projectChunksDir as NSString).appendingPathComponent(chunkFileName)
+
+      do {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        let data = try encoder.encode(chunk)
+        try data.write(to: URL(fileURLWithPath: chunkFilePath))
+      } catch {
+        logger.warning(
+          "Failed to save chunk",
+          metadata: [
+            "chunk_id": "\(chunk.id)",
+            "error": "\(error)",
+          ])
+        throw IndexingError.fileReadingFailed(chunkFilePath, error)
+      }
+    }
+
+    logger.info(
+      "Saved chunks to disk",
+      metadata: [
+        "project": "\(projectName)",
+        "chunk_count": "\(chunks.count)",
+        "directory": "\(projectChunksDir)",
+      ])
   }
 }
 

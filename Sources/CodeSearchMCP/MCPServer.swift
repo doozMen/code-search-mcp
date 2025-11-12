@@ -47,7 +47,7 @@ actor MCPServer: Sendable {
     self.embeddingService = try await EmbeddingService(indexPath: indexPath)
     self.vectorSearchService = VectorSearchService(indexPath: indexPath, embeddingService: self.embeddingService)
     self.codeMetadataExtractor = CodeMetadataExtractor(indexPath: indexPath)
-    self.projectIndexer = ProjectIndexer(indexPath: indexPath)
+    self.projectIndexer = ProjectIndexer(indexPath: indexPath, embeddingService: self.embeddingService)
 
     self.logger.info(
       "MCP server initialized",

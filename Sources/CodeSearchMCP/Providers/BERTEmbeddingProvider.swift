@@ -51,7 +51,7 @@ actor BERTEmbeddingProvider: EmbeddingProvider {
   // MARK: - EmbeddingProvider Protocol
 
   /// Number of dimensions (384 for BERT all-MiniLM-L6-v2)
-  let dimensions: Int = 384
+  nonisolated let dimensions: Int = 384
 
   func generateEmbedding(for text: String) async throws -> [Float] {
     // Batch of 1 is efficient enough, server handles it

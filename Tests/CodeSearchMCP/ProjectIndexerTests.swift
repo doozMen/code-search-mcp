@@ -54,6 +54,10 @@ struct ProjectIndexerTests {
     try FileManager.default.createDirectory(atPath: buildDir, withIntermediateDirectories: true)
   }
 
+  private static func createEmbeddingService(indexPath: String) async throws -> EmbeddingService {
+    return try await EmbeddingService(indexPath: indexPath)
+  }
+
   // MARK: - Initialization Tests
 
   @Test("ProjectIndexer creates index directory")
@@ -61,7 +65,8 @@ struct ProjectIndexerTests {
     let tempDir = try Self.createTempDir()
     defer { Self.cleanupTempDir(tempDir) }
 
-    let indexer = ProjectIndexer(indexPath: tempDir)
+    let embeddingService = try await Self.createEmbeddingService(indexPath: tempDir)
+    let indexer = ProjectIndexer(indexPath: tempDir, embeddingService: embeddingService)
 
     #expect(indexer != nil)
     #expect(FileManager.default.fileExists(atPath: tempDir))
@@ -78,7 +83,8 @@ struct ProjectIndexerTests {
     try FileManager.default.createDirectory(atPath: projectDir, withIntermediateDirectories: true)
     try Self.createTestProject(at: projectDir)
 
-    let indexer = ProjectIndexer(indexPath: tempDir)
+    let embeddingService = try await Self.createEmbeddingService(indexPath: tempDir)
+    let indexer = ProjectIndexer(indexPath: tempDir, embeddingService: embeddingService)
 
     // Index the project (should not throw)
     try await indexer.indexProject(path: projectDir)
@@ -92,7 +98,8 @@ struct ProjectIndexerTests {
     let tempDir = try Self.createTempDir()
     defer { Self.cleanupTempDir(tempDir) }
 
-    let indexer = ProjectIndexer(indexPath: tempDir)
+    let embeddingService = try await Self.createEmbeddingService(indexPath: tempDir)
+    let indexer = ProjectIndexer(indexPath: tempDir, embeddingService: embeddingService)
 
     await #expect(throws: IndexingError.self) {
       try await indexer.indexProject(path: "/nonexistent/path")
@@ -125,7 +132,8 @@ struct ProjectIndexerTests {
     let validFile = (projectDir as NSString).appendingPathComponent("main.swift")
     try "print(\"hello\")".write(toFile: validFile, atomically: true, encoding: .utf8)
 
-    let indexer = ProjectIndexer(indexPath: tempDir)
+    let embeddingService = try await Self.createEmbeddingService(indexPath: tempDir)
+    let indexer = ProjectIndexer(indexPath: tempDir, embeddingService: embeddingService)
     try await indexer.indexProject(path: projectDir)
 
     // Should complete without indexing excluded files
@@ -145,7 +153,8 @@ struct ProjectIndexerTests {
     let swiftFile = (projectDir as NSString).appendingPathComponent("main.swift")
     try "print(\"hello\")".write(toFile: swiftFile, atomically: true, encoding: .utf8)
 
-    let indexer = ProjectIndexer(indexPath: tempDir)
+    let embeddingService = try await Self.createEmbeddingService(indexPath: tempDir)
+    let indexer = ProjectIndexer(indexPath: tempDir, embeddingService: embeddingService)
     try await indexer.indexProject(path: projectDir)
 
     #expect(true)
@@ -162,7 +171,8 @@ struct ProjectIndexerTests {
     let pythonFile = (projectDir as NSString).appendingPathComponent("main.py")
     try "print('hello')".write(toFile: pythonFile, atomically: true, encoding: .utf8)
 
-    let indexer = ProjectIndexer(indexPath: tempDir)
+    let embeddingService = try await Self.createEmbeddingService(indexPath: tempDir)
+    let indexer = ProjectIndexer(indexPath: tempDir, embeddingService: embeddingService)
     try await indexer.indexProject(path: projectDir)
 
     #expect(true)
@@ -179,7 +189,8 @@ struct ProjectIndexerTests {
     let jsFile = (projectDir as NSString).appendingPathComponent("main.js")
     try "console.log('hello');".write(toFile: jsFile, atomically: true, encoding: .utf8)
 
-    let indexer = ProjectIndexer(indexPath: tempDir)
+    let embeddingService = try await Self.createEmbeddingService(indexPath: tempDir)
+    let indexer = ProjectIndexer(indexPath: tempDir, embeddingService: embeddingService)
     try await indexer.indexProject(path: projectDir)
 
     #expect(true)
@@ -202,7 +213,8 @@ struct ProjectIndexerTests {
       }
       """.write(toFile: smallFile, atomically: true, encoding: .utf8)
 
-    let indexer = ProjectIndexer(indexPath: tempDir)
+    let embeddingService = try await Self.createEmbeddingService(indexPath: tempDir)
+    let indexer = ProjectIndexer(indexPath: tempDir, embeddingService: embeddingService)
     try await indexer.indexProject(path: projectDir)
 
     // Should create 1 chunk for small file
@@ -226,7 +238,8 @@ struct ProjectIndexerTests {
     let largeFile = (projectDir as NSString).appendingPathComponent("large.swift")
     try largeContent.write(toFile: largeFile, atomically: true, encoding: .utf8)
 
-    let indexer = ProjectIndexer(indexPath: tempDir)
+    let embeddingService = try await Self.createEmbeddingService(indexPath: tempDir)
+    let indexer = ProjectIndexer(indexPath: tempDir, embeddingService: embeddingService)
     try await indexer.indexProject(path: projectDir)
 
     // Should create multiple chunks (50 lines per chunk with overlap)
@@ -247,7 +260,8 @@ struct ProjectIndexerTests {
     let validFile = (projectDir as NSString).appendingPathComponent("valid.swift")
     try "print(\"hello\")".write(toFile: validFile, atomically: true, encoding: .utf8)
 
-    let indexer = ProjectIndexer(indexPath: tempDir)
+    let embeddingService = try await Self.createEmbeddingService(indexPath: tempDir)
+    let indexer = ProjectIndexer(indexPath: tempDir, embeddingService: embeddingService)
 
     // Should handle errors gracefully and continue
     try await indexer.indexProject(path: projectDir)
@@ -273,7 +287,8 @@ struct ProjectIndexerTests {
       """
     try content.write(toFile: testFile, atomically: true, encoding: .utf8)
 
-    let indexer = ProjectIndexer(indexPath: tempDir)
+    let embeddingService = try await Self.createEmbeddingService(indexPath: tempDir)
+    let indexer = ProjectIndexer(indexPath: tempDir, embeddingService: embeddingService)
     let result = try await indexer.extractFileContext(filePath: testFile)
 
     #expect(result.filePath == testFile)
@@ -299,7 +314,8 @@ struct ProjectIndexerTests {
       """
     try content.write(toFile: testFile, atomically: true, encoding: .utf8)
 
-    let indexer = ProjectIndexer(indexPath: tempDir)
+    let embeddingService = try await Self.createEmbeddingService(indexPath: tempDir)
+    let indexer = ProjectIndexer(indexPath: tempDir, embeddingService: embeddingService)
     let result = try await indexer.extractFileContext(
       filePath: testFile,
       startLine: 2,
@@ -329,7 +345,8 @@ struct ProjectIndexerTests {
     }
     try lines.joined(separator: "\n").write(toFile: testFile, atomically: true, encoding: .utf8)
 
-    let indexer = ProjectIndexer(indexPath: tempDir)
+    let embeddingService = try await Self.createEmbeddingService(indexPath: tempDir)
+    let indexer = ProjectIndexer(indexPath: tempDir, embeddingService: embeddingService)
     let result = try await indexer.extractFileContext(
       filePath: testFile,
       startLine: 10,
@@ -348,7 +365,8 @@ struct ProjectIndexerTests {
     let tempDir = try Self.createTempDir()
     defer { Self.cleanupTempDir(tempDir) }
 
-    let indexer = ProjectIndexer(indexPath: tempDir)
+    let embeddingService = try await Self.createEmbeddingService(indexPath: tempDir)
+    let indexer = ProjectIndexer(indexPath: tempDir, embeddingService: embeddingService)
 
     await #expect(throws: IndexingError.self) {
       try await indexer.extractFileContext(filePath: "/nonexistent/file.swift")
@@ -366,7 +384,8 @@ struct ProjectIndexerTests {
     let testFile = (projectDir as NSString).appendingPathComponent("test.swift")
     try "line 1\nline 2\nline 3".write(toFile: testFile, atomically: true, encoding: .utf8)
 
-    let indexer = ProjectIndexer(indexPath: tempDir)
+    let embeddingService = try await Self.createEmbeddingService(indexPath: tempDir)
+    let indexer = ProjectIndexer(indexPath: tempDir, embeddingService: embeddingService)
 
     // Invalid range (beyond file length)
     await #expect(throws: IndexingError.self) {
@@ -398,7 +417,8 @@ struct ProjectIndexerTests {
     let jsFile = (projectDir as NSString).appendingPathComponent("test.js")
     try "function test() {}".write(toFile: jsFile, atomically: true, encoding: .utf8)
 
-    let indexer = ProjectIndexer(indexPath: tempDir)
+    let embeddingService = try await Self.createEmbeddingService(indexPath: tempDir)
+    let indexer = ProjectIndexer(indexPath: tempDir, embeddingService: embeddingService)
 
     let swiftResult = try await indexer.extractFileContext(filePath: swiftFile)
     #expect(swiftResult.language == "Swift")
@@ -410,88 +430,9 @@ struct ProjectIndexerTests {
     #expect(jsResult.language == "JavaScript")
   }
 
-  // MARK: - Symbol Extraction Tests
+  // MARK: - Symbol Extraction Tests (Removed - Keyword Search Deprecated)
 
-  @Test("Extract Swift symbols from content")
-  func testExtractSwiftSymbols() async throws {
-    let tempDir = try Self.createTempDir()
-    defer { Self.cleanupTempDir(tempDir) }
-
-    let indexer = ProjectIndexer(indexPath: tempDir)
-
-    let content = """
-      class MyClass {
-        func myMethod() {}
-        var myProperty: String
-      }
-      """
-
-    let symbols = await indexer.extractSymbols(from: content, language: "Swift", filePath: "test.swift")
-
-    #expect(symbols.count >= 3)
-    let symbolNames = symbols.map { $0.0 }
-    #expect(symbolNames.contains("MyClass"))
-    #expect(symbolNames.contains("myMethod"))
-    #expect(symbolNames.contains("myProperty"))
-  }
-
-  @Test("Extract Python symbols from content")
-  func testExtractPythonSymbols() async throws {
-    let tempDir = try Self.createTempDir()
-    defer { Self.cleanupTempDir(tempDir) }
-
-    let indexer = ProjectIndexer(indexPath: tempDir)
-
-    let content = """
-      class MyClass:
-        def my_method(self):
-          pass
-      """
-
-    let symbols = await indexer.extractSymbols(from: content, language: "Python", filePath: "test.py")
-
-    #expect(!symbols.isEmpty)
-    let symbolNames = symbols.map { $0.0 }
-    #expect(symbolNames.contains("MyClass"))
-    #expect(symbolNames.contains("my_method"))
-  }
-
-  @Test("Extract JavaScript symbols from content")
-  func testExtractJavaScriptSymbols() async throws {
-    let tempDir = try Self.createTempDir()
-    defer { Self.cleanupTempDir(tempDir) }
-
-    let indexer = ProjectIndexer(indexPath: tempDir)
-
-    let content = """
-      class MyClass {
-        myMethod() {}
-      }
-      function myFunction() {}
-      """
-
-    let symbols = await indexer.extractSymbols(from: content, language: "JavaScript", filePath: "test.js")
-
-    #expect(!symbols.isEmpty)
-    let symbolNames = symbols.map { $0.0 }
-    #expect(symbolNames.contains("MyClass"))
-    #expect(symbolNames.contains("myFunction"))
-  }
-
-  @Test("Symbol extraction marks definitions correctly")
-  func testSymbolExtractionDefinitionMarking() async throws {
-    let tempDir = try Self.createTempDir()
-    defer { Self.cleanupTempDir(tempDir) }
-
-    let indexer = ProjectIndexer(indexPath: tempDir)
-
-    let content = "func myFunction() {}"
-
-    let symbols = await indexer.extractSymbols(from: content, language: "Swift", filePath: "test.swift")
-
-    #expect(!symbols.isEmpty)
-    // All extracted symbols should be definitions (third tuple element is true)
-    let allDefinitions = symbols.allSatisfy { $0.2 == true }
-    #expect(allDefinitions)
-  }
+  // Symbol extraction was part of keyword search functionality, which has been
+  // deprecated in favor of pure vector-based search. All symbol-related tests
+  // have been archived to deprecated/KeywordSearchServiceTests.swift.disabled
 }

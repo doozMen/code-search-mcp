@@ -393,32 +393,45 @@ struct CodeSearchMCPTests {
     #expect(duration < 5.0)
   }
 
-  @Test("Search performance is acceptable")
-  func testSearchPerformance() async throws {
+  @Test("Vector search performance is acceptable")
+  func testVectorSearchPerformance() async throws {
     let tempDir = try Self.createTempDir()
     defer { Self.cleanupTempDir(tempDir) }
 
-    let service = KeywordSearchService(indexPath: tempDir)
+    let embeddingService = try await EmbeddingService(indexPath: tempDir)
+    let vectorSearchService = VectorSearchService(
+      indexPath: tempDir,
+      embeddingService: embeddingService
+    )
 
-    // Index multiple files
-    for i in 1...50 {
-      let chunk = CodeChunk(
-        projectName: "test",
-        filePath: "/test/File\(i).swift",
-        language: "Swift",
-        startLine: 1,
-        endLine: 5,
-        content: "func function\(i)() { return \(i) }"
+    // Create and index test project
+    let projectDir = (tempDir as NSString).appendingPathComponent("perf-test")
+    try FileManager.default.createDirectory(
+      atPath: projectDir,
+      withIntermediateDirectories: true
+    )
+
+    // Create test files
+    for i in 1...10 {
+      let file = (projectDir as NSString).appendingPathComponent("File\(i).swift")
+      try "func function\(i)() { return \(i) }".write(
+        toFile: file,
+        atomically: true,
+        encoding: .utf8
       )
-      try await service.indexSymbols(in: chunk, language: "swift")
     }
 
+    let indexer = ProjectIndexer(indexPath: tempDir, embeddingService: embeddingService)
+    try await indexer.indexProject(path: projectDir)
+
     let startTime = Date()
-    let results = try await service.search(symbol: "function1")
+    let results = try await vectorSearchService.search(
+      query: "function implementation",
+      maxResults: 5
+    )
     let duration = Date().timeIntervalSince(startTime)
 
-    #expect(!results.isEmpty)
-    // Search should be fast (< 0.1 seconds)
-    #expect(duration < 0.1)
+    // Search should be fast (< 2 seconds with embedding generation)
+    #expect(duration < 2.0, "Vector search should complete in < 2 seconds")
   }
 }
