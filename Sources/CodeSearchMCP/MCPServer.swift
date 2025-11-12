@@ -17,7 +17,6 @@ actor MCPServer: Sendable {
   private let projectIndexer: ProjectIndexer
   private let embeddingService: EmbeddingService
   private let vectorSearchService: VectorSearchService
-  private let keywordSearchService: KeywordSearchService
   private let codeMetadataExtractor: CodeMetadataExtractor
 
   // MARK: - Initialization
@@ -45,14 +44,10 @@ actor MCPServer: Sendable {
     )
 
     // Initialize services
-    self.embeddingService = EmbeddingService(indexPath: indexPath)
-    self.vectorSearchService = VectorSearchService(indexPath: indexPath)
-    self.keywordSearchService = KeywordSearchService(indexPath: indexPath)
+    self.embeddingService = try await EmbeddingService(indexPath: indexPath)
+    self.vectorSearchService = VectorSearchService(indexPath: indexPath, embeddingService: self.embeddingService)
     self.codeMetadataExtractor = CodeMetadataExtractor(indexPath: indexPath)
-    self.projectIndexer = ProjectIndexer(
-      indexPath: indexPath,
-      keywordSearchService: self.keywordSearchService
-    )
+    self.projectIndexer = ProjectIndexer(indexPath: indexPath)
 
     self.logger.info(
       "MCP server initialized",
@@ -142,31 +137,6 @@ actor MCPServer: Sendable {
         ])
       ),
 
-      // Keyword search tool
-      Tool(
-        name: "keyword_search",
-        description:
-          "Search for symbols, function names, or class definitions using keyword matching",
-        inputSchema: .object([
-          "type": "object",
-          "properties": .object([
-            "symbol": .object([
-              "type": "string",
-              "description": "Symbol name, function name, or class name to search for",
-            ]),
-            "includeReferences": .object([
-              "type": "boolean",
-              "description": "Include all references to this symbol (default: false)",
-            ]),
-            "projectFilter": .object([
-              "type": "string",
-              "description": "Optional project name to limit search scope",
-            ]),
-          ]),
-          "required": .array([.string("symbol")]),
-        ])
-      ),
-
       // File context tool
       Tool(
         name: "file_context",
@@ -246,9 +216,6 @@ actor MCPServer: Sendable {
     case "semantic_search":
       return try await handleSemanticSearch(params.arguments ?? [:])
 
-    case "keyword_search":
-      return try await handleKeywordSearch(params.arguments ?? [:])
-
     case "file_context":
       return try await handleFileContext(params.arguments ?? [:])
 
@@ -293,35 +260,6 @@ actor MCPServer: Sendable {
     let results = try await vectorSearchService.search(
       query: query,
       maxResults: maxResults,
-      projectFilter: projectFilter
-    )
-
-    return formatSearchResults(results)
-  }
-
-  /// Handle keyword_search tool call.
-  private func handleKeywordSearch(_ args: [String: Value]) async throws -> CallTool.Result {
-    guard let symbolValue = args["symbol"] else {
-      throw MCPError.invalidParams("Missing required parameter: symbol")
-    }
-    guard let symbol = symbolValue.stringValue else {
-      throw MCPError.invalidParams("Parameter 'symbol' must be a string")
-    }
-
-    let includeReferences = args["includeReferences"]?.boolValue ?? false
-    let projectFilter = args["projectFilter"]?.stringValue
-
-    logger.debug(
-      "Keyword search",
-      metadata: [
-        "symbol": "\(symbol)",
-        "include_references": "\(includeReferences)",
-      ])
-
-    // Delegate to keyword search service
-    let results = try await keywordSearchService.search(
-      symbol: symbol,
-      includeReferences: includeReferences,
       projectFilter: projectFilter
     )
 
@@ -419,7 +357,6 @@ actor MCPServer: Sendable {
 
     // Get metadata from services
     let embeddingStats = try await embeddingService.getCacheStats()
-    let keywordStats = try await keywordSearchService.getIndexStats()
 
     // Build status report
     let statusLines: [String] = [
@@ -432,13 +369,9 @@ actor MCPServer: Sendable {
       "  - Cache misses: \(embeddingStats.cacheMisses)",
       "  - Hit rate: \(String(format: "%.1f%%", embeddingStats.hitRate * 100))",
       "",
-      "Symbol Index:",
-      "  - Indexed projects: \(keywordStats.indexedProjects)",
-      "  - Total symbols: \(keywordStats.totalSymbols)",
-      "  - Total files: \(keywordStats.totalFiles)",
-      "",
       "Configuration:",
       "  - Embedding model: BERT (384-dimensional)",
+      "  - Search type: Vector-based semantic search only",
       "  - Index path: \(embeddingStats.indexPath)",
       "  - Status: Active",
     ]
@@ -446,8 +379,7 @@ actor MCPServer: Sendable {
     logger.info(
       "Index status retrieved",
       metadata: [
-        "embeddings": "\(embeddingStats.totalEmbeddings)",
-        "symbols": "\(keywordStats.totalSymbols)",
+        "embeddings": "\(embeddingStats.totalEmbeddings)"
       ])
 
     return CallTool.Result(
