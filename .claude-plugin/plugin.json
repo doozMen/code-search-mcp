@@ -1,7 +1,7 @@
 {
   "name": "code-search-mcp",
   "description": "Semantic code search with BERT embeddings. Multi-project search, keyword matching, and relationship mapping for codebases.",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "author": {
     "name": "PromptPing",
     "email": "stijn@dooz.be",
