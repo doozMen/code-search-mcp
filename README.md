@@ -1,17 +1,16 @@
 # code-search-mcp
 
-An MCP server for semantic and keyword-based code search across multiple projects using 384-dimensional BERT embeddings.
+An MCP server for pure vector-based semantic code search across multiple projects using 384-dimensional BERT embeddings.
 
 ## Features
 
-- **Semantic Search**: Find code with similar meaning using vector embeddings
-- **Keyword Search**: Quick symbol and function name lookups
+- **Semantic Search**: Find code with similar meaning using 384-dimensional BERT vector embeddings
 - **File Context Extraction**: Get code snippets with surrounding context
 - **Dependency Analysis**: Find files that import or depend on a given file
 - **Multi-Project Support**: Index and search across multiple codebases
 - **Language Support**: Swift, Python, JavaScript/TypeScript, Java, Go, Rust, C/C++, C#, Ruby, PHP, Kotlin
 - **Smart Caching**: Cache embeddings to avoid recomputation
-- **Comprehensive Metadata**: Track project structure, statistics, and dependencies
+- **Pure Vector Search**: No regex patterns, no keyword matching - 100% semantic understanding
 
 ## Requirements
 
@@ -90,6 +89,36 @@ Add to Claude Desktop config (`~/Library/Application Support/Claude/claude_deskt
 }
 ```
 
+### direnv Integration (Automatic Project Selection)
+
+Use direnv to automatically scope searches to your current project directory:
+
+```bash
+# 1. Copy template to your project
+cd ~/Developer/MyApp
+cp ~/.swiftpm/share/code-search-mcp/.envrc.template .envrc
+
+# 2. Edit .envrc to set your project name
+export CODE_SEARCH_PROJECT_NAME="MyApp"
+
+# 3. Allow direnv to load it
+direnv allow
+
+# 4. Now searches auto-scope to MyApp!
+# In Claude Code: "Find auth code" → searches MyApp only
+```
+
+**Environment Variables**:
+- `CODE_SEARCH_PROJECT_NAME`: Auto-filter searches to this project
+- Explicit `projectFilter` parameter overrides environment
+
+**Benefits**:
+- No manual project filtering needed
+- Context-aware search based on current directory
+- Works seamlessly with multi-project workflows
+
+---
+
 ## Usage
 
 ### Tool: semantic_search
@@ -108,26 +137,6 @@ Search for code with similar meaning to your query.
   "arguments": {
     "query": "function that validates email addresses",
     "maxResults": 5
-  }
-}
-```
-
-### Tool: keyword_search
-
-Search for specific symbols, functions, or class names.
-
-**Parameters**:
-- `symbol` (required): Symbol name to search for
-- `includeReferences` (optional): Include all references (default: false)
-- `projectFilter` (optional): Limit search to specific project
-
-**Example**:
-```json
-{
-  "name": "keyword_search",
-  "arguments": {
-    "symbol": "validateEmail",
-    "includeReferences": true
   }
 }
 ```
@@ -192,9 +201,8 @@ Get metadata and statistics about indexed projects.
 ### Services
 
 - **ProjectIndexer**: Crawls directories and extracts code chunks
-- **EmbeddingService**: Generates and caches 384-d BERT embeddings
-- **VectorSearchService**: Performs cosine similarity search
-- **KeywordSearchService**: Indexes and searches for symbols
+- **EmbeddingService**: Generates and caches 384-d BERT embeddings (via Python bridge)
+- **VectorSearchService**: Performs cosine similarity search on vector embeddings
 - **CodeMetadataExtractor**: Builds dependency graphs and extracts metadata
 
 ### Models
@@ -210,8 +218,7 @@ Index data stored in `~/.cache/code-search-mcp/`:
 
 ```
 ~/.cache/code-search-mcp/
-├── embeddings/          # Cached BERT embeddings (one file per unique text)
-├── symbols/             # Symbol index (one file per project)
+├── embeddings/          # Cached BERT embeddings (one file per unique text hash)
 └── dependencies/        # Dependency graphs (one file per project)
 ```
 
@@ -313,10 +320,9 @@ rm -rf ~/.cache/code-search-mcp
 
 ## Limitations
 
-- Currently uses hash-based placeholder embeddings (TODO: BERT integration)
-- Symbol extraction supports common patterns (more patterns can be added)
-- Dependency tracking works for explicit imports (implicit dependencies not tracked)
+- Dependency tracking works for explicit imports only (implicit dependencies not tracked)
 - No support for cross-language dependency tracking
+- Vector search is O(n) - performance scales linearly with index size
 
 ## License
 

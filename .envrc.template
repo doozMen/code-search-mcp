@@ -1,0 +1,18 @@
+# direnv configuration for code-search-mcp auto project selection
+#
+# Usage:
+#   1. Copy this file to your project root: cp .envrc.template .envrc
+#   2. Edit CODE_SEARCH_PROJECT_NAME to match your project
+#   3. Run: direnv allow
+#
+# When you cd into this directory, direnv will automatically set the project
+# filter for code-search-mcp semantic searches.
+
+# Set to your project name (will auto-filter searches to this project)
+export CODE_SEARCH_PROJECT_NAME="MyProject"
+
+# Optional: Explicitly set project path for indexing
+# export CODE_SEARCH_PROJECT_PATH="$(pwd)"
+
+# Optional: Set search scope (project=this project only, workspace=all projects)
+# export CODE_SEARCH_SEARCH_SCOPE="project"

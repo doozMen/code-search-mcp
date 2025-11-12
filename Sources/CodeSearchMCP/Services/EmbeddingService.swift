@@ -3,11 +3,14 @@ import Logging
 
 /// Service responsible for generating and caching vector embeddings.
 ///
-/// Uses 384-dimensional BERT embeddings for code understanding.
+/// Uses pluggable embedding providers:
+/// - Primary: CoreML/NaturalLanguage (300-dimensional, native Swift)
+/// - Fallback: BERT (384-dimensional, Python bridge) - future
+///
 /// Embeddings are cached to disk to avoid recomputation.
 ///
 /// Responsibilities:
-/// - Generate embeddings for code chunks using BERT model
+/// - Generate embeddings for code chunks using configured provider
 /// - Cache embeddings to disk for persistence
 /// - Retrieve cached embeddings
 /// - Handle embedding model initialization and lifecycle
@@ -18,24 +21,33 @@ actor EmbeddingService: Sendable {
   private let logger: Logger
   private let fileManager = FileManager.default
 
+  /// Embedding provider (CoreML or BERT)
+  private let provider: any EmbeddingProvider
+
   /// Cache directory for embeddings
   private let embeddingsCacheDir: String
 
-  /// BERT embedding model (384-dimensional)
-  /// NOTE: This will be initialized when embeddings need to be generated
-  private var embeddingModel: BERTEmbedding?
+  // MARK: - Computed Properties
 
-  // MARK: - Constants
-
-  private let embeddingDimension = 384
-  private let modelName = "bert-base-uncased"
+  /// Current embedding dimensions from provider
+  var embeddingDimension: Int {
+    provider.dimensions
+  }
 
   // MARK: - Initialization
 
-  init(indexPath: String) {
+  init(indexPath: String, provider: (any EmbeddingProvider)? = nil) async throws {
     self.indexPath = indexPath
     self.embeddingsCacheDir = (indexPath as NSString).appendingPathComponent("embeddings")
     self.logger = Logger(label: "embedding-service")
+
+    // Use provided provider or create default (CoreML)
+    if let provider = provider {
+      self.provider = provider
+    } else {
+      // Default to CoreML provider
+      self.provider = try CoreMLEmbeddingProvider()
+    }
 
     // Create embeddings cache directory
     try? fileManager.createDirectory(
@@ -44,11 +56,12 @@ actor EmbeddingService: Sendable {
       attributes: nil
     )
 
-    logger.debug(
+    let dimensions = self.provider.dimensions
+    logger.info(
       "EmbeddingService initialized",
       metadata: [
-        "dimension": "\(embeddingDimension)",
-        "model": "\(modelName)",
+        "dimensions": "\(dimensions)",
+        "provider": "CoreML (NLEmbedding)",
         "cache_dir": "\(embeddingsCacheDir)",
       ])
   }
@@ -57,10 +70,10 @@ actor EmbeddingService: Sendable {
 
   /// Generate embedding for a text string.
   ///
-  /// First checks cache, then generates if needed using BERT model.
+  /// First checks cache, then generates if needed using configured provider.
   ///
   /// - Parameter text: Text to embed (code snippet or description)
-  /// - Returns: Array of 384 floating-point values representing the embedding
+  /// - Returns: Array of floating-point values representing the embedding
   /// - Throws: If embedding generation fails
   func generateEmbedding(for text: String) async throws -> [Float] {
     // Check cache first
@@ -69,17 +82,25 @@ actor EmbeddingService: Sendable {
       return cached
     }
 
-    // Generate new embedding
+    // Generate new embedding using provider
     logger.debug(
       "Generating new embedding",
       metadata: [
         "text_length": "\(text.count)"
       ])
 
-    throw CodeSearchError.notYetImplemented(
-      feature: "BERT embedding generation",
-      issueNumber: nil
-    )
+    let embedding = try await provider.generateEmbedding(for: text)
+
+    // Cache the result
+    try await cacheEmbedding(embedding, for: text)
+
+    logger.debug(
+      "Generated and cached embedding",
+      metadata: [
+        "dimensions": "\(embedding.count)"
+      ])
+
+    return embedding
   }
 
   /// Generate embeddings for multiple text strings in batch.
@@ -263,11 +284,3 @@ enum EmbeddingError: Error, LocalizedError {
   }
 }
 
-// MARK: - Placeholder Type
-
-/// Placeholder for BERT embedding model integration.
-///
-/// This will be replaced with actual swift-embeddings integration.
-struct BERTEmbedding: Sendable {
-  let modelName: String
-}

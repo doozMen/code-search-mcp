@@ -14,7 +14,10 @@ actor ProjectIndexer: Sendable {
   private let indexPath: String
   private let logger: Logger
   private let fileManager = FileManager.default
-  private let keywordSearchService: KeywordSearchService?
+  private let embeddingService: EmbeddingService
+
+  /// Registry tracking all indexed projects
+  private var projectRegistry: ProjectRegistry
 
   /// File extensions to index by language
   private let supportedExtensions: [String: String] = [
@@ -39,9 +42,9 @@ actor ProjectIndexer: Sendable {
 
   // MARK: - Initialization
 
-  init(indexPath: String, keywordSearchService: KeywordSearchService? = nil) {
+  init(indexPath: String, embeddingService: EmbeddingService) {
     self.indexPath = indexPath
-    self.keywordSearchService = keywordSearchService
+    self.embeddingService = embeddingService
     self.logger = Logger(label: "project-indexer")
 
     // Ensure index directory exists
@@ -50,6 +53,25 @@ actor ProjectIndexer: Sendable {
       withIntermediateDirectories: true,
       attributes: nil
     )
+
+    // Load existing project registry
+    let registryPath = (indexPath as NSString).appendingPathComponent("project_registry.json")
+    if fileManager.fileExists(atPath: registryPath),
+      let data = try? Data(contentsOf: URL(fileURLWithPath: registryPath))
+    {
+      let decoder = JSONDecoder()
+      decoder.dateDecodingStrategy = .iso8601
+      if let registry = try? decoder.decode(ProjectRegistry.self, from: data) {
+        self.projectRegistry = registry
+        logger.info("Loaded project registry", metadata: ["project_count": "\(registry.count)"])
+      } else {
+        self.projectRegistry = ProjectRegistry()
+        logger.info("Initialized empty project registry")
+      }
+    } else {
+      self.projectRegistry = ProjectRegistry()
+      logger.info("Initialized empty project registry")
+    }
   }
 
   // MARK: - Public Interface
@@ -88,17 +110,39 @@ actor ProjectIndexer: Sendable {
 
     // Extract code chunks from each file
     var totalChunks = 0
+    var chunksWithEmbeddings: [CodeChunk] = []
+
     for filePath in sourceFiles {
       do {
-        let chunks = try extractCodeChunks(from: filePath, projectName: projectName)
-        totalChunks += chunks.count
+        var chunks = try extractCodeChunks(from: filePath, projectName: projectName)
 
-        // Index symbols from chunks if service available
-        if let keywordService = keywordSearchService {
-          for chunk in chunks {
-            try await keywordService.indexSymbols(in: chunk, language: chunk.language)
+        // Generate embeddings for each chunk
+        for i in 0..<chunks.count {
+          do {
+            let embedding = try await embeddingService.generateEmbedding(for: chunks[i].content)
+            chunks[i] = chunks[i].withEmbedding(embedding)
+
+            logger.debug(
+              "Generated embedding for chunk",
+              metadata: [
+                "file": "\((filePath as NSString).lastPathComponent)",
+                "chunk_id": "\(chunks[i].id)",
+                "embedding_size": "\(embedding.count)",
+              ])
+          } catch {
+            logger.warning(
+              "Failed to generate embedding for chunk, skipping",
+              metadata: [
+                "file": "\(filePath)",
+                "chunk_id": "\(chunks[i].id)",
+                "error": "\(error)",
+              ])
+            // Continue without embedding for this chunk
           }
         }
+
+        chunksWithEmbeddings.append(contentsOf: chunks)
+        totalChunks += chunks.count
 
         logger.debug(
           "Extracted chunks",
@@ -116,12 +160,119 @@ actor ProjectIndexer: Sendable {
       }
     }
 
+    // Save chunks to disk for vector search
+    try await saveChunks(chunksWithEmbeddings, projectName: projectName)
+
+    // Update project metadata in registry
+    let languageCounts = chunksWithEmbeddings.reduce(into: [String: Int]()) { counts, chunk in
+      counts[chunk.language, default: 0] += 1
+    }
+    let totalLines = chunksWithEmbeddings.reduce(0) { $0 + $1.lineCount }
+
+    let metadata = ProjectMetadata(
+      name: projectName,
+      rootPath: path,
+      fileCount: sourceFiles.count,
+      chunkCount: chunksWithEmbeddings.count,
+      lineCount: totalLines,
+      languages: languageCounts,
+      indexStatus: .complete
+    )
+    projectRegistry.register(metadata)
+    try saveProjectRegistry()
+
     logger.info(
       "Project indexing complete",
       metadata: [
         "project": "\(projectName)",
         "total_chunks": "\(totalChunks)",
       ])
+  }
+
+  // MARK: - Index Management
+
+  /// Reload (re-index) a specific project by name.
+  ///
+  /// Clears existing chunks and embeddings for the project, then re-indexes from scratch.
+  ///
+  /// - Parameter projectName: Name of project to reload
+  /// - Throws: IndexingError if project not found or reindexing fails
+  func reindexProject(projectName: String) async throws {
+    guard let metadata = projectRegistry.project(named: projectName) else {
+      logger.warning("Project not found in registry", metadata: ["project": "\(projectName)"])
+      throw IndexingError.projectNotFound(projectName)
+    }
+
+    logger.info("Reindexing project", metadata: ["project": "\(projectName)"])
+
+    // Clear existing chunks for this project
+    let chunksDir = (indexPath as NSString).appendingPathComponent("chunks/\(projectName)")
+    if fileManager.fileExists(atPath: chunksDir) {
+      try fileManager.removeItem(atPath: chunksDir)
+      logger.debug("Cleared existing chunks", metadata: ["project": "\(projectName)"])
+    }
+
+    // Re-index the project
+    try await indexProject(path: metadata.rootPath)
+  }
+
+  /// Reload all indexed projects.
+  ///
+  /// Re-indexes every project currently in the registry.
+  ///
+  /// - Throws: IndexingError if any project fails to reindex
+  func reindexAllProjects() async throws {
+    let projects = projectRegistry.allProjects()
+
+    logger.info("Reindexing all projects", metadata: ["count": "\(projects.count)"])
+
+    for project in projects {
+      do {
+        try await reindexProject(projectName: project.name)
+      } catch {
+        logger.error(
+          "Failed to reindex project",
+          metadata: [
+            "project": "\(project.name)",
+            "error": "\(error)",
+          ])
+        throw error
+      }
+    }
+
+    logger.info("All projects reindexed successfully")
+  }
+
+  /// Clear all indexed data (destructive operation).
+  ///
+  /// Removes all chunks, embeddings, and project metadata. This cannot be undone.
+  ///
+  /// - Throws: IndexingError if clearing fails
+  func clearAllIndexes() async throws {
+    logger.warning("Clearing all indexes - this cannot be undone")
+
+    // Clear chunks directory
+    let chunksDir = (indexPath as NSString).appendingPathComponent("chunks")
+    if fileManager.fileExists(atPath: chunksDir) {
+      try fileManager.removeItem(atPath: chunksDir)
+      logger.debug("Cleared chunks directory")
+    }
+
+    // Clear project registry
+    projectRegistry = ProjectRegistry()
+    try saveProjectRegistry()
+
+    // Clear embeddings cache (delegate to embedding service)
+    try await embeddingService.clearCache()
+
+    logger.info("All indexes cleared successfully")
+  }
+
+  /// Get list of all indexed projects.
+  ///
+  /// - Returns: Array of project metadata
+  func getIndexedProjects() -> [ProjectMetadata] {
+    projectRegistry.allProjects()
   }
 
   // MARK: - Private Methods
@@ -304,268 +455,6 @@ actor ProjectIndexer: Sendable {
     return "block"
   }
 
-  // MARK: - Symbol Extraction
-
-  /// Extract symbols from code content for indexing.
-  ///
-  /// Uses regex patterns to identify definitions like functions, classes, methods, etc.
-  ///
-  /// - Parameters:
-  ///   - content: Source code content
-  ///   - language: Programming language
-  ///   - filePath: Path to the file (for context)
-  /// - Returns: Array of symbol names found in the code
-  func extractSymbols(from content: String, language: String, filePath: String) -> [(
-    String, Int, Bool
-  )] {
-    // Returns tuples of (symbolName, lineNumber, isDefinition)
-    var symbols: [(String, Int, Bool)] = []
-    let lines = content.split(separator: "\n", omittingEmptySubsequences: false)
-
-    switch language.lowercased() {
-    case "swift":
-      symbols.append(contentsOf: extractSwiftSymbols(lines: lines))
-    case "python":
-      symbols.append(contentsOf: extractPythonSymbols(lines: lines))
-    case "javascript", "typescript":
-      symbols.append(contentsOf: extractJavaScriptSymbols(lines: lines))
-    case "java":
-      symbols.append(contentsOf: extractJavaSymbols(lines: lines))
-    case "go":
-      symbols.append(contentsOf: extractGoSymbols(lines: lines))
-    default:
-      symbols.append(contentsOf: extractGenericSymbols(lines: lines))
-    }
-
-    return symbols
-  }
-
-  /// Extract Swift symbols using regex patterns.
-  private func extractSwiftSymbols(lines: [Substring]) -> [(String, Int, Bool)] {
-    var symbols: [(String, Int, Bool)] = []
-
-    let patterns = [
-      // class, struct, protocol, enum, actor (definitions)
-      (
-        pattern:
-          #"^\s*(?:public\s+|private\s+|internal\s+|fileprivate\s+)?(?:final\s+)?(?:class|struct|protocol|enum|actor)\s+(\w+)"#,
-        isDefinition: true
-      ),
-      // functions (definitions)
-      (
-        pattern:
-          #"^\s*(?:public\s+|private\s+|internal\s+|fileprivate\s+)?(?:static\s+)?func\s+(\w+)"#,
-        isDefinition: true
-      ),
-      // var/let properties (definitions)
-      (
-        pattern:
-          #"^\s*(?:public\s+|private\s+|internal\s+|fileprivate\s+)?(?:static\s+)?(?:var|let)\s+(\w+)"#,
-        isDefinition: true
-      ),
-      // init methods
-      (
-        pattern: #"^\s*(?:public\s+|private\s+|internal\s+|fileprivate\s+)?init\s*\("#,
-        isDefinition: true
-      ),
-    ]
-
-    for (lineIndex, line) in lines.enumerated() {
-      let lineString = String(line)
-      for (patternString, isDefinition) in patterns {
-        if let regex = try? NSRegularExpression(pattern: patternString, options: []),
-          let match = regex.firstMatch(
-            in: lineString, options: [], range: NSRange(lineString.startIndex..., in: lineString))
-        {
-          if match.numberOfRanges > 1 {
-            let range = match.range(at: 1)
-            if let swiftRange = Range(range, in: lineString) {
-              let symbolName = String(lineString[swiftRange])
-              symbols.append((symbolName, lineIndex + 1, isDefinition))
-            }
-          } else if lineString.contains("init") {
-            // Special case for init
-            symbols.append(("init", lineIndex + 1, true))
-          }
-        }
-      }
-    }
-
-    return symbols
-  }
-
-  /// Extract Python symbols using regex patterns.
-  private func extractPythonSymbols(lines: [Substring]) -> [(String, Int, Bool)] {
-    var symbols: [(String, Int, Bool)] = []
-
-    let patterns = [
-      // class definitions
-      (pattern: #"^\s*class\s+(\w+)"#, isDefinition: true),
-      // function definitions
-      (pattern: #"^\s*def\s+(\w+)"#, isDefinition: true),
-      // async function definitions
-      (pattern: #"^\s*async\s+def\s+(\w+)"#, isDefinition: true),
-    ]
-
-    for (lineIndex, line) in lines.enumerated() {
-      let lineString = String(line)
-      for (patternString, isDefinition) in patterns {
-        if let regex = try? NSRegularExpression(pattern: patternString, options: []),
-          let match = regex.firstMatch(
-            in: lineString, options: [], range: NSRange(lineString.startIndex..., in: lineString))
-        {
-          if match.numberOfRanges > 1 {
-            let range = match.range(at: 1)
-            if let swiftRange = Range(range, in: lineString) {
-              let symbolName = String(lineString[swiftRange])
-              symbols.append((symbolName, lineIndex + 1, isDefinition))
-            }
-          }
-        }
-      }
-    }
-
-    return symbols
-  }
-
-  /// Extract JavaScript/TypeScript symbols using regex patterns.
-  private func extractJavaScriptSymbols(lines: [Substring]) -> [(String, Int, Bool)] {
-    var symbols: [(String, Int, Bool)] = []
-
-    let patterns = [
-      // class definitions
-      (pattern: #"^\s*(?:export\s+)?(?:default\s+)?class\s+(\w+)"#, isDefinition: true),
-      // function declarations
-      (pattern: #"^\s*(?:export\s+)?(?:async\s+)?function\s+(\w+)"#, isDefinition: true),
-      // const/let function expressions
-      (pattern: #"^\s*(?:export\s+)?const\s+(\w+)\s*=\s*(?:async\s+)?\("#, isDefinition: true),
-      // arrow functions
-      (pattern: #"^\s*(?:export\s+)?const\s+(\w+)\s*=\s*\([^)]*\)\s*=>"#, isDefinition: true),
-      // method definitions in classes
-      (pattern: #"^\s*(?:async\s+)?(\w+)\s*\([^)]*\)\s*\{"#, isDefinition: true),
-    ]
-
-    for (lineIndex, line) in lines.enumerated() {
-      let lineString = String(line)
-      for (patternString, isDefinition) in patterns {
-        if let regex = try? NSRegularExpression(pattern: patternString, options: []),
-          let match = regex.firstMatch(
-            in: lineString, options: [], range: NSRange(lineString.startIndex..., in: lineString))
-        {
-          if match.numberOfRanges > 1 {
-            let range = match.range(at: 1)
-            if let swiftRange = Range(range, in: lineString) {
-              let symbolName = String(lineString[swiftRange])
-              symbols.append((symbolName, lineIndex + 1, isDefinition))
-            }
-          }
-        }
-      }
-    }
-
-    return symbols
-  }
-
-  /// Extract Java symbols using regex patterns.
-  private func extractJavaSymbols(lines: [Substring]) -> [(String, Int, Bool)] {
-    var symbols: [(String, Int, Bool)] = []
-
-    let patterns = [
-      // class/interface definitions
-      (
-        pattern:
-          #"^\s*(?:public\s+|private\s+|protected\s+)?(?:abstract\s+)?(?:class|interface|enum)\s+(\w+)"#,
-        isDefinition: true
-      ),
-      // method definitions
-      (
-        pattern:
-          #"^\s*(?:public\s+|private\s+|protected\s+)?(?:static\s+)?(?:\w+)\s+(\w+)\s*\([^)]*\)"#,
-        isDefinition: true
-      ),
-    ]
-
-    for (lineIndex, line) in lines.enumerated() {
-      let lineString = String(line)
-      for (patternString, isDefinition) in patterns {
-        if let regex = try? NSRegularExpression(pattern: patternString, options: []),
-          let match = regex.firstMatch(
-            in: lineString, options: [], range: NSRange(lineString.startIndex..., in: lineString))
-        {
-          if match.numberOfRanges > 1 {
-            let range = match.range(at: 1)
-            if let swiftRange = Range(range, in: lineString) {
-              let symbolName = String(lineString[swiftRange])
-              symbols.append((symbolName, lineIndex + 1, isDefinition))
-            }
-          }
-        }
-      }
-    }
-
-    return symbols
-  }
-
-  /// Extract Go symbols using regex patterns.
-  private func extractGoSymbols(lines: [Substring]) -> [(String, Int, Bool)] {
-    var symbols: [(String, Int, Bool)] = []
-
-    let patterns = [
-      // function definitions
-      (pattern: #"^\s*func\s+(?:\([^)]+\)\s+)?(\w+)"#, isDefinition: true),
-      // type definitions
-      (pattern: #"^\s*type\s+(\w+)\s+(?:struct|interface)"#, isDefinition: true),
-      // const/var declarations
-      (pattern: #"^\s*(?:const|var)\s+(\w+)"#, isDefinition: true),
-    ]
-
-    for (lineIndex, line) in lines.enumerated() {
-      let lineString = String(line)
-      for (patternString, isDefinition) in patterns {
-        if let regex = try? NSRegularExpression(pattern: patternString, options: []),
-          let match = regex.firstMatch(
-            in: lineString, options: [], range: NSRange(lineString.startIndex..., in: lineString))
-        {
-          if match.numberOfRanges > 1 {
-            let range = match.range(at: 1)
-            if let swiftRange = Range(range, in: lineString) {
-              let symbolName = String(lineString[swiftRange])
-              symbols.append((symbolName, lineIndex + 1, isDefinition))
-            }
-          }
-        }
-      }
-    }
-
-    return symbols
-  }
-
-  /// Extract generic symbols using simple patterns.
-  private func extractGenericSymbols(lines: [Substring]) -> [(String, Int, Bool)] {
-    var symbols: [(String, Int, Bool)] = []
-
-    // Very generic pattern: look for identifier-looking names after common keywords
-    let pattern = #"^\s*(?:function|def|class|struct|enum|interface|type)\s+(\w+)"#
-
-    for (lineIndex, line) in lines.enumerated() {
-      let lineString = String(line)
-      if let regex = try? NSRegularExpression(pattern: pattern, options: []),
-        let match = regex.firstMatch(
-          in: lineString, options: [], range: NSRange(lineString.startIndex..., in: lineString))
-      {
-        if match.numberOfRanges > 1 {
-          let range = match.range(at: 1)
-          if let swiftRange = Range(range, in: lineString) {
-            let symbolName = String(lineString[swiftRange])
-            symbols.append((symbolName, lineIndex + 1, true))
-          }
-        }
-      }
-    }
-
-    return symbols
-  }
-
   // MARK: - File Context Extraction
 
   /// Extract code context from a file with optional line range.
@@ -712,6 +601,74 @@ actor ProjectIndexer: Sendable {
 
     return "Unknown"
   }
+
+  // MARK: - Chunk Persistence
+
+  /// Save code chunks to disk for vector search.
+  ///
+  /// Stores chunks in project-specific directory for efficient loading.
+  ///
+  /// - Parameters:
+  ///   - chunks: Code chunks to save
+  ///   - projectName: Project name for organization
+  /// - Throws: If file writing fails
+  private func saveChunks(_ chunks: [CodeChunk], projectName: String) async throws {
+    let chunksDir = (indexPath as NSString).appendingPathComponent("chunks")
+    let projectChunksDir = (chunksDir as NSString).appendingPathComponent(projectName)
+
+    // Create project chunks directory
+    try fileManager.createDirectory(
+      atPath: projectChunksDir,
+      withIntermediateDirectories: true,
+      attributes: nil
+    )
+
+    // Save each chunk as a separate JSON file
+    for chunk in chunks {
+      let chunkFileName = "\(chunk.id).json"
+      let chunkFilePath = (projectChunksDir as NSString).appendingPathComponent(chunkFileName)
+
+      do {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        let data = try encoder.encode(chunk)
+        try data.write(to: URL(fileURLWithPath: chunkFilePath))
+      } catch {
+        logger.warning(
+          "Failed to save chunk",
+          metadata: [
+            "chunk_id": "\(chunk.id)",
+            "error": "\(error)",
+          ])
+        throw IndexingError.fileReadingFailed(chunkFilePath, error)
+      }
+    }
+
+    logger.info(
+      "Saved chunks to disk",
+      metadata: [
+        "project": "\(projectName)",
+        "chunk_count": "\(chunks.count)",
+        "directory": "\(projectChunksDir)",
+      ])
+  }
+
+  // MARK: - Registry Persistence
+
+  /// Save project registry to disk.
+  ///
+  /// - Throws: If file writing fails
+  private func saveProjectRegistry() throws {
+    let registryPath = (indexPath as NSString).appendingPathComponent("project_registry.json")
+    let encoder = JSONEncoder()
+    encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+    encoder.dateEncodingStrategy = .iso8601
+
+    let data = try encoder.encode(projectRegistry)
+    try data.write(to: URL(fileURLWithPath: registryPath))
+
+    logger.debug("Project registry saved", metadata: ["path": "\(registryPath)"])
+  }
 }
 
 // MARK: - Error Types
@@ -720,6 +677,7 @@ enum IndexingError: Error, LocalizedError {
   case invalidProjectPath(String)
   case directoryEnumerationFailed(String)
   case fileReadingFailed(String, Error)
+  case projectNotFound(String)
 
   var errorDescription: String? {
     switch self {
@@ -729,6 +687,8 @@ enum IndexingError: Error, LocalizedError {
       return "Failed to enumerate directory: \(directory)"
     case .fileReadingFailed(let file, let error):
       return "Failed to read file \(file): \(error)"
+    case .projectNotFound(let name):
+      return "Project not found in registry: \(name)"
     }
   }
 }
