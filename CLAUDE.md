@@ -4,7 +4,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Repository Purpose
 
-**code-search-mcp** is a Model Context Protocol (MCP) server that provides semantic and keyword-based code search across multiple projects using 384-dimensional BERT embeddings. It enables natural language code search, symbol lookup, file context extraction, and dependency graph analysis.
+**code-search-mcp** is a Model Context Protocol (MCP) server that provides **pure vector-based semantic code search** across multiple projects using 768-dimensional BERT embeddings (CoreML).
+
+**Architectural Decision**: This server focuses 100% on vector-based semantic search. Regex-based keyword/symbol search has been intentionally removed to simplify the architecture and focus on semantic understanding. See `deprecated/README.md` for details on what was removed and why.
+
+**Embedding Provider**: Uses **CoreML BERT** (bert-base-uncased) for vector generation. Foundation Models (macOS 26.0+) does NOT provide embedding APIs and is not used. See `FOUNDATION_MODELS_EMBEDDING_ASSESSMENT.md` for detailed analysis.
 
 ## Build & Development Commands
 
@@ -63,35 +67,33 @@ All services are Swift 6 actors for strict concurrency:
 ```
 MCPServer (Actor)
 ├── ProjectIndexer        # File crawling and chunk extraction
-├── EmbeddingService      # BERT embedding generation and caching
+├── EmbeddingService      # BERT embedding generation and caching (Python bridge)
 ├── VectorSearchService   # Cosine similarity semantic search
-├── KeywordSearchService  # Symbol indexing and lookup
 └── CodeMetadataExtractor # Dependency graph construction
 ```
 
 **Critical**: All types crossing actor boundaries must implement `Sendable`. Use `async/await` for all actor method calls.
 
-### MCP Tools Provided
+### MCP Tools Provided (3 tools - vector-only)
 
-1. **semantic_search** - Find code by semantic similarity using vector embeddings
-2. **keyword_search** - Search for symbols, functions, or class names
-3. **file_context** - Extract code snippets with surrounding context
-4. **find_related** - Find files through import/dependency relationships
-5. **index_status** - Get metadata about indexed projects
+1. **semantic_search** - Find code by semantic similarity using 384-d BERT embeddings
+2. **file_context** - Extract code snippets with surrounding context
+3. **index_status** - Get metadata about indexed projects
+
+**Removed**: `keyword_search` tool was intentionally removed to focus on pure vector-based semantic search. See `deprecated/README.md` for migration guide.
 
 ### Data Flow
 
 **Indexing Flow**:
 ```
-Directory → ProjectIndexer → CodeChunks → EmbeddingService → Cache
-                           → KeywordSearchService → Symbol Index
+Directory → ProjectIndexer → CodeChunks → EmbeddingService (Python) → Cache
                            → CodeMetadataExtractor → Dependency Graph
 ```
 
-**Search Flow**:
+**Search Flow** (Vector-only):
 ```
-Query → Generate Embedding → VectorSearchService → Cosine Similarity → Results
-Query → KeywordSearchService → Symbol Lookup → Results
+Query → EmbeddingService (Python) → 384-d Vector
+      → VectorSearchService → Cosine Similarity → Ranked Results
 ```
 
 ### Storage Structure
@@ -101,9 +103,10 @@ Index data stored in `~/.cache/code-search-mcp/`:
 ```
 ~/.cache/code-search-mcp/
 ├── embeddings/          # Cached BERT embeddings (hash-based filenames)
-├── symbols/             # Symbol index per project (JSON)
 └── dependencies/        # Dependency graphs per project (JSON)
 ```
+
+**Note**: The `symbols/` directory is no longer used. Symbol indexing has been removed in favor of pure vector search.
 
 ## Key Implementation Patterns
 
