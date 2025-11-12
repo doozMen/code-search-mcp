@@ -4,12 +4,15 @@ This document describes the architecture and design of the code-search-mcp MCP s
 
 ## Overview
 
-code-search-mcp is a Model Context Protocol server that provides semantic and keyword-based code search across multiple projects. It uses:
+code-search-mcp is a Model Context Protocol server that provides **pure vector-based semantic code search** across multiple projects. It uses:
 
-- **Vector Embeddings**: 384-dimensional BERT embeddings for semantic understanding
-- **Keyword Indexing**: Fast symbol and identifier search
+- **Vector Embeddings**: 300/384-dimensional embeddings (CoreML/BERT) for semantic understanding
+- **Cosine Similarity**: Geometric proximity in vector space for ranking
 - **Dependency Tracking**: Import/dependency relationship mapping
-- **Multi-Project Support**: Index and search across multiple codebases
+- **Multi-Project Support**: Index and search across multiple codebases with automatic project selection via direnv
+- **Mac Studio Optimized**: SIMD acceleration (Accelerate framework) and in-memory indexing for 128GB RAM systems
+
+**Architectural Decision**: This tool focuses exclusively on vector-based semantic search. Traditional keyword/symbol search has been intentionally removed to simplify the architecture and provide superior semantic understanding. See `deprecated/README.md` for migration details.
 
 ## System Architecture
 
@@ -60,11 +63,11 @@ All services are implemented as Swift 6 actors for strict concurrency:
 
 ```
 MCPServer
-├── ProjectIndexer
-├── EmbeddingService
-├── VectorSearchService
-├── KeywordSearchService
-└── CodeMetadataExtractor
+├── ProjectIndexer       # File crawling and code chunking
+├── EmbeddingService     # CoreML/BERT embedding generation with provider pattern
+├── VectorSearchService  # SIMD-accelerated cosine similarity search
+├── InMemoryVectorIndex  # 128GB RAM-optimized vector index
+└── CodeMetadataExtractor # Dependency graph construction
 
 All types crossing actor boundaries implement Sendable
 ```
@@ -88,10 +91,11 @@ Each service is responsible for:
    - Result ranking by relevance
    - Index querying
 
-4. **KeywordSearchService**
-   - Symbol index management
-   - Language-specific symbol extraction
-   - Fast symbol lookups
+4. **InMemoryVectorIndex**
+   - Pre-loads embeddings into RAM (leverages 128GB)
+   - SIMD-accelerated similarity computation (194x speedup)
+   - Parallel search with TaskGroup
+   - LRU eviction (100GB memory limit)
 
 5. **CodeMetadataExtractor**
    - Dependency graph construction
@@ -332,16 +336,23 @@ Output:
 
 ```
 ~/.cache/code-search-mcp/
-├── embeddings/
-│   ├── 3f1a2b4c.embedding          # Hash-based filenames
-│   ├── 5e6d7f9a.embedding
+├── embeddings/                      # Global shared cache (deduplication)
+│   ├── a3f2b8...embedding          # Hash-based filenames
+│   ├── d9e4c1...embedding          # JSON array of Float (300 or 384 dims)
 │   └── ...
-├── symbols/
-│   ├── project1.symbols.json       # Symbol index per project
-│   ├── project2.symbols.json
+├── chunks/                          # Project-specific chunk metadata
+│   ├── MyApp/
+│   │   ├── chunk-uuid1.json        # CodeChunk with projectName, filePath, embedding
+│   │   ├── chunk-uuid2.json
+│   │   └── ...
+│   ├── MyLib/
+│   │   └── ...
 │   └── ...
-└── dependencies/
-    ├── project1.graph.json         # Dependency graph per project
+├── dependencies/                    # Dependency graphs per project
+│   ├── MyApp.graph.json
+│   └── MyLib.graph.json
+└── project_registry.json            # Project metadata and timestamps
+```
     ├── project2.graph.json
     └── ...
 ```

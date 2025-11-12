@@ -18,6 +18,7 @@ actor MCPServer: Sendable {
   private let embeddingService: EmbeddingService
   private let vectorSearchService: VectorSearchService
   private let codeMetadataExtractor: CodeMetadataExtractor
+  private let defaultProjectFilter: String?
 
   // MARK: - Initialization
 
@@ -45,9 +46,22 @@ actor MCPServer: Sendable {
 
     // Initialize services
     self.embeddingService = try await EmbeddingService(indexPath: indexPath)
-    self.vectorSearchService = VectorSearchService(indexPath: indexPath, embeddingService: self.embeddingService)
+    self.vectorSearchService = VectorSearchService(
+      indexPath: indexPath, embeddingService: self.embeddingService)
     self.codeMetadataExtractor = CodeMetadataExtractor(indexPath: indexPath)
-    self.projectIndexer = ProjectIndexer(indexPath: indexPath, embeddingService: self.embeddingService)
+    self.projectIndexer = ProjectIndexer(
+      indexPath: indexPath, embeddingService: self.embeddingService)
+
+    // Read default project filter from environment
+    self.defaultProjectFilter = ProcessInfo.processInfo.environment["CODE_SEARCH_PROJECT_NAME"]
+
+    if let projectFilter = defaultProjectFilter {
+      self.logger.info(
+        "Default project filter from environment",
+        metadata: [
+          "project": "\(projectFilter)"
+        ])
+    }
 
     self.logger.info(
       "MCP server initialized",
@@ -195,6 +209,49 @@ actor MCPServer: Sendable {
           "properties": .object([:]),
         ])
       ),
+
+      // Reload index tool
+      Tool(
+        name: "reload_index",
+        description:
+          "Reload (re-index) a specific project or all projects. Use when code has changed or index is stale.",
+        inputSchema: .object([
+          "type": "object",
+          "properties": .object([
+            "projectName": .object([
+              "type": "string",
+              "description": "Name of project to reload (omit to reload all projects)",
+            ])
+          ]),
+        ])
+      ),
+
+      // Clear index tool
+      Tool(
+        name: "clear_index",
+        description:
+          "Clear all indexed data (destructive operation). Removes all chunks, embeddings, and project metadata. Cannot be undone.",
+        inputSchema: .object([
+          "type": "object",
+          "properties": .object([
+            "confirm": .object([
+              "type": "boolean",
+              "description": "Must be true to confirm destructive operation",
+            ])
+          ]),
+          "required": .array([.string("confirm")]),
+        ])
+      ),
+
+      // List projects tool
+      Tool(
+        name: "list_projects",
+        description: "List all indexed projects with their metadata and statistics",
+        inputSchema: .object([
+          "type": "object",
+          "properties": .object([:]),
+        ])
+      ),
     ]
 
     return ListTools.Result(tools: tools)
@@ -225,6 +282,15 @@ actor MCPServer: Sendable {
     case "index_status":
       return try await handleIndexStatus()
 
+    case "reload_index":
+      return try await handleReloadIndex(params.arguments ?? [:])
+
+    case "clear_index":
+      return try await handleClearIndex(params.arguments ?? [:])
+
+    case "list_projects":
+      return try await handleListProjects()
+
     default:
       logger.warning(
         "Unknown tool requested",
@@ -247,13 +313,15 @@ actor MCPServer: Sendable {
     }
 
     let maxResults = args["maxResults"]?.intValue ?? 10
-    let projectFilter = args["projectFilter"]?.stringValue
+    // Use environment default if no explicit filter provided
+    let projectFilter = args["projectFilter"]?.stringValue ?? self.defaultProjectFilter
 
     logger.debug(
       "Semantic search",
       metadata: [
         "query": "\(query)",
         "max_results": "\(maxResults)",
+        "project_filter": "\(projectFilter ?? "none")",
       ])
 
     // Delegate to vector search service
@@ -389,6 +457,131 @@ actor MCPServer: Sendable {
     )
   }
 
+  /// Handle reload_index tool call.
+  private func handleReloadIndex(_ args: [String: Value]) async throws -> CallTool.Result {
+    let projectName = args["projectName"]?.stringValue
+
+    if let project = projectName {
+      // Reload specific project
+      logger.info("Reloading project", metadata: ["project": "\(project)"])
+
+      do {
+        try await projectIndexer.reindexProject(projectName: project)
+        logger.info("Project reloaded successfully", metadata: ["project": "\(project)"])
+
+        return CallTool.Result(
+          content: [
+            .text("Successfully reloaded project: \(project)")
+          ]
+        )
+      } catch {
+        logger.error(
+          "Failed to reload project",
+          metadata: [
+            "project": "\(project)",
+            "error": "\(error)",
+          ])
+        throw MCPError.internalError("Failed to reload project \(project): \(error)")
+      }
+    } else {
+      // Reload all projects
+      logger.info("Reloading all projects")
+
+      do {
+        try await projectIndexer.reindexAllProjects()
+        logger.info("All projects reloaded successfully")
+
+        return CallTool.Result(
+          content: [
+            .text("Successfully reloaded all projects")
+          ]
+        )
+      } catch {
+        logger.error("Failed to reload all projects", metadata: ["error": "\(error)"])
+        throw MCPError.internalError("Failed to reload all projects: \(error)")
+      }
+    }
+  }
+
+  /// Handle clear_index tool call.
+  private func handleClearIndex(_ args: [String: Value]) async throws -> CallTool.Result {
+    guard let confirmValue = args["confirm"] else {
+      throw MCPError.invalidParams("Missing required parameter: confirm")
+    }
+    guard let confirm = confirmValue.boolValue else {
+      throw MCPError.invalidParams("Parameter 'confirm' must be a boolean")
+    }
+
+    guard confirm else {
+      return CallTool.Result(
+        content: [
+          .text("Index clear cancelled. Set confirm=true to proceed with destructive operation.")
+        ]
+      )
+    }
+
+    logger.warning("Clearing all indexes - destructive operation")
+
+    do {
+      try await projectIndexer.clearAllIndexes()
+      logger.info("All indexes cleared successfully")
+
+      return CallTool.Result(
+        content: [
+          .text(
+            "Successfully cleared all indexes. All chunks, embeddings, and project metadata have been removed."
+          )
+        ]
+      )
+    } catch {
+      logger.error("Failed to clear indexes", metadata: ["error": "\(error)"])
+      throw MCPError.internalError("Failed to clear indexes: \(error)")
+    }
+  }
+
+  /// Handle list_projects tool call.
+  private func handleListProjects() async throws -> CallTool.Result {
+    logger.debug("Listing indexed projects")
+
+    let projects = await projectIndexer.getIndexedProjects()
+
+    guard !projects.isEmpty else {
+      return CallTool.Result(
+        content: [
+          .text("No projects have been indexed yet.")
+        ]
+      )
+    }
+
+    var output = "Indexed Projects (\(projects.count)):\n\n"
+    for project in projects {
+      let languages = project.languages.sorted { $0.value > $1.value }
+        .prefix(3)
+        .map { "\($0.key) (\($0.value))" }
+        .joined(separator: ", ")
+
+      output += """
+        Project: \(project.name)
+        Path: \(project.rootPath)
+        Status: \(project.indexStatus.rawValue)
+        Files: \(project.fileCount)
+        Chunks: \(project.chunkCount)
+        Lines: \(project.lineCount)
+        Languages: \(languages)
+        Last Updated: \(formatDate(project.lastUpdatedAt))
+
+        """
+    }
+
+    logger.info("Listed projects", metadata: ["count": "\(projects.count)"])
+
+    return CallTool.Result(
+      content: [
+        .text(output)
+      ]
+    )
+  }
+
   // MARK: - Result Formatting
 
   /// Format search results for MCP response.
@@ -434,5 +627,13 @@ actor MCPServer: Sendable {
     }
 
     return output
+  }
+
+  /// Format date for display.
+  private func formatDate(_ date: Date) -> String {
+    let formatter = DateFormatter()
+    formatter.dateStyle = .medium
+    formatter.timeStyle = .short
+    return formatter.string(from: date)
   }
 }

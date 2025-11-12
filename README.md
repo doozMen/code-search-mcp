@@ -89,6 +89,36 @@ Add to Claude Desktop config (`~/Library/Application Support/Claude/claude_deskt
 }
 ```
 
+### direnv Integration (Automatic Project Selection)
+
+Use direnv to automatically scope searches to your current project directory:
+
+```bash
+# 1. Copy template to your project
+cd ~/Developer/MyApp
+cp ~/.swiftpm/share/code-search-mcp/.envrc.template .envrc
+
+# 2. Edit .envrc to set your project name
+export CODE_SEARCH_PROJECT_NAME="MyApp"
+
+# 3. Allow direnv to load it
+direnv allow
+
+# 4. Now searches auto-scope to MyApp!
+# In Claude Code: "Find auth code" → searches MyApp only
+```
+
+**Environment Variables**:
+- `CODE_SEARCH_PROJECT_NAME`: Auto-filter searches to this project
+- Explicit `projectFilter` parameter overrides environment
+
+**Benefits**:
+- No manual project filtering needed
+- Context-aware search based on current directory
+- Works seamlessly with multi-project workflows
+
+---
+
 ## Usage
 
 ### Tool: semantic_search

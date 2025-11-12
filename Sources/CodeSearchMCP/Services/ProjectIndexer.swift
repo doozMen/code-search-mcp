@@ -16,6 +16,9 @@ actor ProjectIndexer: Sendable {
   private let fileManager = FileManager.default
   private let embeddingService: EmbeddingService
 
+  /// Registry tracking all indexed projects
+  private var projectRegistry: ProjectRegistry
+
   /// File extensions to index by language
   private let supportedExtensions: [String: String] = [
     "swift": "Swift",
@@ -50,6 +53,25 @@ actor ProjectIndexer: Sendable {
       withIntermediateDirectories: true,
       attributes: nil
     )
+
+    // Load existing project registry
+    let registryPath = (indexPath as NSString).appendingPathComponent("project_registry.json")
+    if fileManager.fileExists(atPath: registryPath),
+      let data = try? Data(contentsOf: URL(fileURLWithPath: registryPath))
+    {
+      let decoder = JSONDecoder()
+      decoder.dateDecodingStrategy = .iso8601
+      if let registry = try? decoder.decode(ProjectRegistry.self, from: data) {
+        self.projectRegistry = registry
+        logger.info("Loaded project registry", metadata: ["project_count": "\(registry.count)"])
+      } else {
+        self.projectRegistry = ProjectRegistry()
+        logger.info("Initialized empty project registry")
+      }
+    } else {
+      self.projectRegistry = ProjectRegistry()
+      logger.info("Initialized empty project registry")
+    }
   }
 
   // MARK: - Public Interface
@@ -141,12 +163,116 @@ actor ProjectIndexer: Sendable {
     // Save chunks to disk for vector search
     try await saveChunks(chunksWithEmbeddings, projectName: projectName)
 
+    // Update project metadata in registry
+    let languageCounts = chunksWithEmbeddings.reduce(into: [String: Int]()) { counts, chunk in
+      counts[chunk.language, default: 0] += 1
+    }
+    let totalLines = chunksWithEmbeddings.reduce(0) { $0 + $1.lineCount }
+
+    let metadata = ProjectMetadata(
+      name: projectName,
+      rootPath: path,
+      fileCount: sourceFiles.count,
+      chunkCount: chunksWithEmbeddings.count,
+      lineCount: totalLines,
+      languages: languageCounts,
+      indexStatus: .complete
+    )
+    projectRegistry.register(metadata)
+    try saveProjectRegistry()
+
     logger.info(
       "Project indexing complete",
       metadata: [
         "project": "\(projectName)",
         "total_chunks": "\(totalChunks)",
       ])
+  }
+
+  // MARK: - Index Management
+
+  /// Reload (re-index) a specific project by name.
+  ///
+  /// Clears existing chunks and embeddings for the project, then re-indexes from scratch.
+  ///
+  /// - Parameter projectName: Name of project to reload
+  /// - Throws: IndexingError if project not found or reindexing fails
+  func reindexProject(projectName: String) async throws {
+    guard let metadata = projectRegistry.project(named: projectName) else {
+      logger.warning("Project not found in registry", metadata: ["project": "\(projectName)"])
+      throw IndexingError.projectNotFound(projectName)
+    }
+
+    logger.info("Reindexing project", metadata: ["project": "\(projectName)"])
+
+    // Clear existing chunks for this project
+    let chunksDir = (indexPath as NSString).appendingPathComponent("chunks/\(projectName)")
+    if fileManager.fileExists(atPath: chunksDir) {
+      try fileManager.removeItem(atPath: chunksDir)
+      logger.debug("Cleared existing chunks", metadata: ["project": "\(projectName)"])
+    }
+
+    // Re-index the project
+    try await indexProject(path: metadata.rootPath)
+  }
+
+  /// Reload all indexed projects.
+  ///
+  /// Re-indexes every project currently in the registry.
+  ///
+  /// - Throws: IndexingError if any project fails to reindex
+  func reindexAllProjects() async throws {
+    let projects = projectRegistry.allProjects()
+
+    logger.info("Reindexing all projects", metadata: ["count": "\(projects.count)"])
+
+    for project in projects {
+      do {
+        try await reindexProject(projectName: project.name)
+      } catch {
+        logger.error(
+          "Failed to reindex project",
+          metadata: [
+            "project": "\(project.name)",
+            "error": "\(error)",
+          ])
+        throw error
+      }
+    }
+
+    logger.info("All projects reindexed successfully")
+  }
+
+  /// Clear all indexed data (destructive operation).
+  ///
+  /// Removes all chunks, embeddings, and project metadata. This cannot be undone.
+  ///
+  /// - Throws: IndexingError if clearing fails
+  func clearAllIndexes() async throws {
+    logger.warning("Clearing all indexes - this cannot be undone")
+
+    // Clear chunks directory
+    let chunksDir = (indexPath as NSString).appendingPathComponent("chunks")
+    if fileManager.fileExists(atPath: chunksDir) {
+      try fileManager.removeItem(atPath: chunksDir)
+      logger.debug("Cleared chunks directory")
+    }
+
+    // Clear project registry
+    projectRegistry = ProjectRegistry()
+    try saveProjectRegistry()
+
+    // Clear embeddings cache (delegate to embedding service)
+    try await embeddingService.clearCache()
+
+    logger.info("All indexes cleared successfully")
+  }
+
+  /// Get list of all indexed projects.
+  ///
+  /// - Returns: Array of project metadata
+  func getIndexedProjects() -> [ProjectMetadata] {
+    projectRegistry.allProjects()
   }
 
   // MARK: - Private Methods
@@ -526,6 +652,23 @@ actor ProjectIndexer: Sendable {
         "directory": "\(projectChunksDir)",
       ])
   }
+
+  // MARK: - Registry Persistence
+
+  /// Save project registry to disk.
+  ///
+  /// - Throws: If file writing fails
+  private func saveProjectRegistry() throws {
+    let registryPath = (indexPath as NSString).appendingPathComponent("project_registry.json")
+    let encoder = JSONEncoder()
+    encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+    encoder.dateEncodingStrategy = .iso8601
+
+    let data = try encoder.encode(projectRegistry)
+    try data.write(to: URL(fileURLWithPath: registryPath))
+
+    logger.debug("Project registry saved", metadata: ["path": "\(registryPath)"])
+  }
 }
 
 // MARK: - Error Types
@@ -534,6 +677,7 @@ enum IndexingError: Error, LocalizedError {
   case invalidProjectPath(String)
   case directoryEnumerationFailed(String)
   case fileReadingFailed(String, Error)
+  case projectNotFound(String)
 
   var errorDescription: String? {
     switch self {
@@ -543,6 +687,8 @@ enum IndexingError: Error, LocalizedError {
       return "Failed to enumerate directory: \(directory)"
     case .fileReadingFailed(let file, let error):
       return "Failed to read file \(file): \(error)"
+    case .projectNotFound(let name):
+      return "Project not found in registry: \(name)"
     }
   }
 }

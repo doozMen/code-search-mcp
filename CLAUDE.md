@@ -74,11 +74,18 @@ MCPServer (Actor)
 
 **Critical**: All types crossing actor boundaries must implement `Sendable`. Use `async/await` for all actor method calls.
 
-### MCP Tools Provided (3 tools - vector-only)
+### MCP Tools Provided (7 tools - vector-focused)
 
-1. **semantic_search** - Find code by semantic similarity using 384-d BERT embeddings
+**Core Search Tools**:
+1. **semantic_search** - Find code by semantic similarity using 300/384-d embeddings (CoreML/BERT)
 2. **file_context** - Extract code snippets with surrounding context
-3. **index_status** - Get metadata about indexed projects
+3. **find_related** - Find files through import/dependency relationships
+
+**Index Management Tools**:
+4. **index_status** - Get metadata about indexed projects
+5. **reload_index** - Reload index for a specific project or all projects (use when code changes)
+6. **clear_index** - Clear all indexed data (requires confirmation)
+7. **list_projects** - List all indexed projects with statistics
 
 **Removed**: `keyword_search` tool was intentionally removed to focus on pure vector-based semantic search. See `deprecated/README.md` for migration guide.
 
@@ -102,11 +109,22 @@ Index data stored in `~/.cache/code-search-mcp/`:
 
 ```
 ~/.cache/code-search-mcp/
-├── embeddings/          # Cached BERT embeddings (hash-based filenames)
-└── dependencies/        # Dependency graphs per project (JSON)
+├── embeddings/                      # Global shared cache (deduplication)
+│   └── <sha256-hash>.embedding     # JSON array of Float (300/384 dims)
+├── chunks/                          # Project-specific chunk metadata
+│   ├── <ProjectName>/
+│   │   └── <chunk-uuid>.json       # CodeChunk with projectName, filePath, embedding
+│   └── ...
+├── dependencies/                    # Dependency graphs per project
+│   └── <ProjectName>.graph.json
+└── project_registry.json            # Project metadata and timestamps
 ```
 
-**Note**: The `symbols/` directory is no longer used. Symbol indexing has been removed in favor of pure vector search.
+**Key Features**:
+- **Global embedding deduplication**: Common code stored once, referenced many times (70% space savings)
+- **Project isolation**: Each chunk remembers its projectName, preventing mixing
+- **Search filtering**: Filters by projectName before similarity calculation
+- **direnv support**: Auto-selects project based on `CODE_SEARCH_PROJECT_NAME` environment variable
 
 ## Key Implementation Patterns
 
