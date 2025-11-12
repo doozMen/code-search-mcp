@@ -1,6 +1,6 @@
 {
   "name": "code-search-mcp",
-  "description": "Semantic code search with BERT embeddings. Multi-project search, keyword matching, and relationship mapping for codebases.",
+  "description": "Pure vector-based semantic code search with CoreML embeddings (primary, 4,172 emb/sec) and BERT fallback. SIMD-optimized for Mac Studio with direnv integration. Multi-project support.",
   "version": "0.3.0",
   "author": {
     "name": "PromptPing",
@@ -13,10 +13,13 @@
     "code-search",
     "semantic-search",
     "vector-embeddings",
+    "coreml",
     "bert",
     "swift",
     "mcp",
-    "development-tools"
+    "development-tools",
+    "simd",
+    "mac-studio"
   ],
   "mcpServers": "./.mcp.json"
 }

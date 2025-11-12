@@ -69,14 +69,27 @@ actor MCPServer: Sendable {
         "index_path": "\(indexPath)"
       ])
 
+    // Read projects to index from environment (colon-separated list)
+    var allProjectPaths = projectPaths
+    if let envProjects = ProcessInfo.processInfo.environment["CODE_SEARCH_PROJECTS"] {
+      let envPaths = envProjects.split(separator: ":").map(String.init)
+      allProjectPaths.append(contentsOf: envPaths)
+      self.logger.info(
+        "Projects from environment",
+        metadata: [
+          "count": "\(envPaths.count)",
+          "projects": "\(envProjects)"
+        ])
+    }
+
     // Index initial projects if provided
-    if !projectPaths.isEmpty {
+    if !allProjectPaths.isEmpty {
       self.logger.info(
         "Indexing projects",
         metadata: [
-          "count": "\(projectPaths.count)"
+          "count": "\(allProjectPaths.count)"
         ])
-      for projectPath in projectPaths {
+      for projectPath in allProjectPaths {
         do {
           try await self.projectIndexer.indexProject(path: projectPath)
           self.logger.info(
