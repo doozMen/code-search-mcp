@@ -15,7 +15,7 @@ import os.signpost
 actor InMemoryVectorIndex: Sendable {
     // MARK: - Properties
 
-    private let logger: Logger
+    private let logger: Logging.Logger
     private let signpostLog = OSLog(subsystem: "CodeSearchMCP", category: "VectorIndex")
     private let indexPath: String
 
@@ -43,7 +43,7 @@ actor InMemoryVectorIndex: Sendable {
         let content: String
     }
 
-    struct SearchResult: Sendable {
+    struct InMemorySearchResult: Sendable {
         let chunkId: String
         let similarity: Float
         let metadata: ChunkMetadata
@@ -53,7 +53,7 @@ actor InMemoryVectorIndex: Sendable {
 
     init(indexPath: String) {
         self.indexPath = indexPath
-        self.logger = Logger(label: "in-memory-vector-index")
+        self.logger = Logging.Logger(label: "in-memory-vector-index")
     }
 
     // MARK: - Public Interface
@@ -134,7 +134,7 @@ actor InMemoryVectorIndex: Sendable {
         queryEmbedding: [Float],
         topK: Int = 10,
         projectFilter: String? = nil
-    ) async -> [SearchResult] {
+    ) async -> [InMemorySearchResult] {
         let signpostID = OSSignpostID(log: signpostLog)
         os_signpost(.begin, log: signpostLog, name: "VectorSearch", signpostID: signpostID)
         defer {
@@ -165,7 +165,7 @@ actor InMemoryVectorIndex: Sendable {
         // Parallel similarity computation using TaskGroup
         let results = await withTaskGroup(
             of: (String, Float)?.self,
-            returning: [SearchResult].self
+            returning: [InMemorySearchResult].self
         ) { group in
             // Determine optimal batch size based on CPU cores
             let coreCount = ProcessInfo.processInfo.processorCount
@@ -213,7 +213,7 @@ actor InMemoryVectorIndex: Sendable {
             // Build final results with metadata
             return topResults.compactMap { (chunkId, similarity) in
                 guard let metadata = self.chunkMetadata[chunkId] else { return nil }
-                return SearchResult(
+                return InMemorySearchResult(
                     chunkId: chunkId,
                     similarity: similarity,
                     metadata: metadata
@@ -240,7 +240,7 @@ actor InMemoryVectorIndex: Sendable {
     /// SIMD-optimized cosine similarity using Accelerate framework.
     ///
     /// ~10x faster than naive implementation for 384-dimensional vectors.
-    private func cosineSimilaritySIMD(
+    private nonisolated func cosineSimilaritySIMD(
         _ a: ContiguousArray<Float>,
         _ b: ContiguousArray<Float>
     ) -> Float {
@@ -388,8 +388,9 @@ actor InMemoryVectorIndex: Sendable {
             returning: [(String, Float)].self
         ) { group in
             for chunkId in candidateIds {
-                group.addTask { [queryVector] in
-                    guard let embedding = self.embeddingCache[chunkId] else { return nil }
+                group.addTask { [queryVector, weak self] in
+                    guard let self = self,
+                          let embedding = await self.embeddingCache[chunkId] else { return nil }
                     let similarity = self.cosineSimilaritySIMD(queryVector, embedding)
                     return (chunkId, similarity)
                 }
@@ -410,9 +411,9 @@ actor InMemoryVectorIndex: Sendable {
 
 extension InMemoryVectorIndex {
     /// Convert internal SearchResult to external format.
-    func toSearchResults(_ results: [SearchResult]) -> [CodeSearchMCP.SearchResult] {
+    func toSearchResults(_ results: [InMemorySearchResult]) -> [SearchResult] {
         return results.map { result in
-            CodeSearchMCP.SearchResult.semanticMatch(
+            SearchResult.semanticMatch(
                 projectName: result.metadata.projectName,
                 filePath: result.metadata.filePath,
                 language: result.metadata.language,

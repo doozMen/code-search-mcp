@@ -2,6 +2,9 @@ import Foundation
 import Logging
 import Accelerate
 
+// Disambiguate Logger
+typealias SwiftLogger = Logging.Logger
+
 /// Service responsible for semantic search using vector similarity.
 ///
 /// Performs cosine similarity matching between query embeddings
@@ -16,7 +19,7 @@ actor VectorSearchService: Sendable {
   // MARK: - Properties
 
   private let indexPath: String
-  private let logger: Logger
+  private let logger: SwiftLogger
   private let embeddingService: EmbeddingService
   private let inMemoryIndex: InMemoryVectorIndex
   private var useInMemoryIndex: Bool = false
@@ -27,7 +30,7 @@ actor VectorSearchService: Sendable {
     self.indexPath = indexPath
     self.embeddingService = embeddingService
     self.inMemoryIndex = InMemoryVectorIndex(indexPath: indexPath)
-    self.logger = Logger(label: "vector-search-service")
+    self.logger = SwiftLogger(label: "vector-search-service")
   }
 
   /// Initialize and preload in-memory index for maximum performance.
@@ -169,7 +172,7 @@ actor VectorSearchService: Sendable {
   ///   - vector1: First embedding vector
   ///   - vector2: Second embedding vector
   /// - Returns: Cosine similarity score
-  private func cosineSimilarity(_ vector1: [Float], _ vector2: [Float]) -> Float {
+  private nonisolated func cosineSimilarity(_ vector1: [Float], _ vector2: [Float]) -> Float {
     guard vector1.count == vector2.count, !vector1.isEmpty else {
       return 0.0
     }
