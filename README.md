@@ -89,23 +89,36 @@ Add to Claude Desktop config (`~/Library/Application Support/Claude/claude_deskt
 }
 ```
 
-### direnv Integration (Automatic Project Selection)
+### Automatic Re-Indexing Setup
 
-Use direnv to automatically scope searches to your current project directory:
+Set up automatic re-indexing using git hooks and direnv:
 
 ```bash
-# 1. Copy template to your project
+# Navigate to your project
 cd ~/Developer/MyApp
-cp ~/.swiftpm/share/code-search-mcp/.envrc.template .envrc
 
-# 2. Edit .envrc to set your project name
-export CODE_SEARCH_PROJECT_NAME="MyApp"
+# Run setup command (creates .envrc and .githooks/)
+code-search-mcp setup-hooks --install-hooks
 
-# 3. Allow direnv to load it
+# Allow direnv (if you have it installed)
 direnv allow
+```
 
-# 4. Now searches auto-scope to MyApp!
-# In Claude Code: "Find auth code" → searches MyApp only
+**What it creates**:
+- `.envrc` - Triggers re-indexing when entering the directory
+- `.githooks/` - Re-indexes automatically on commit, merge, and branch switch
+- Git config for hooks - Configures `core.hooksPath` to use `.githooks/`
+
+**Options**:
+```bash
+# Setup without direnv
+code-search-mcp setup-hooks --no-direnv
+
+# Setup without git hooks
+code-search-mcp setup-hooks --no-git-hooks
+
+# Setup for different project
+code-search-mcp setup-hooks --project-path ~/my-other-project
 ```
 
 **Environment Variables**:
@@ -113,9 +126,10 @@ direnv allow
 - Explicit `projectFilter` parameter overrides environment
 
 **Benefits**:
-- No manual project filtering needed
-- Context-aware search based on current directory
+- Index stays up-to-date automatically
+- No manual re-indexing needed
 - Works seamlessly with multi-project workflows
+- Background re-indexing won't block your work
 
 ---
 

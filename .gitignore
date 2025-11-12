@@ -37,6 +37,10 @@ dist/
 # Agent workspace
 .agent-workspace/
 
+# Auto-generated hooks (can be regenerated with setup-hooks command)
+.envrc
+.githooks/
+
 # macOS
 .AppleDouble
 .LSOverride
