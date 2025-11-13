@@ -150,11 +150,57 @@ Use **git subprojects** or **Swift multi-product packages** for now.
 2. `file_context(filePath, startLine, endLine)` - Extract code
 3. `find_related(filePath, direction)` - Dependency navigation
 
-**Management** (4):
+**Management** (5):
 4. `index_status()` - Cache stats
-5. `reload_index(projectName)` - Refresh index
+5. `reload_index(projectName)` - Queue background re-index
 6. `clear_index(confirm)` - Clear all data
 7. `list_projects()` - Show indexed projects
+8. `indexing_progress(jobId)` - Check background job status
+
+## Background Indexing (v0.5.0+)
+
+### Problem Solved
+Previously, when git hooks triggered indexing via the `reload_index` tool, the entire MCP server would block until indexing completed, making the server unresponsive to queries.
+
+### Solution: Async Job Queue
+**IndexingQueue** actor manages background indexing tasks:
+
+**1. Non-Blocking Re-indexing**
+```swift
+// Before v0.5.0: Blocked for 30+ seconds
+try await projectIndexer.reindexProject(projectName: project)
+
+// v0.5.0+: Returns immediately with job ID
+let jobID = await indexingQueue.enqueue(...operation...)
+// Indexing happens in background
+```
+
+**2. Priority-Based Scheduling**
+- `low` - Hook-triggered background indexing
+- `normal` - User-initiated re-indexing via MCP tool
+- `high` - Emergency re-index after migration failures
+
+**3. Checking Progress**
+```bash
+# Check specific job
+indexing_progress(jobId: "550e8400-e29b-41d4-a716-446655440000")
+
+# Check all jobs
+indexing_progress()  # Shows queued, active, completed
+```
+
+**4. Resource Limits**
+- Default: 1 concurrent job (prevents lock contention on index files)
+- Server continues accepting search queries while indexing in background
+- Max 100 completed jobs kept in history for debugging
+
+### How It Works
+1. Tool handler receives `reload_index` call
+2. Enqueues operation to `IndexingQueue` with priority
+3. Returns immediately with job ID and progress tracking info
+4. Background task processes job when slots available
+5. User checks progress with `indexing_progress` tool
+6. On completion: logs file/chunk counts, processes next queued job
 
 ## CLI Commands
 
@@ -250,7 +296,11 @@ vDSP_svesq(a, 1, &magnitudeSquared, count)     // Magnitude
 
 **Project not indexed**: Use `CODE_SEARCH_PROJECTS` env var or `--project-paths` CLI arg
 
-**Stale results**: Run `reload_index` tool or setup auto-indexing with `setup-hooks`
+**Stale results**: Run `reload_index` tool or setup auto-indexing with `setup-hooks`. In v0.5.0+, returns immediately - check progress with `indexing_progress` tool
+
+**Indexing hangs the server**: Fixed in v0.5.0+ with background job queue. `reload_index` now returns immediately with job ID. Server continues accepting queries during indexing.
+
+**How to check indexing progress**: Use `indexing_progress()` to see queued/active/completed jobs. Get specific job status with `indexing_progress(jobId: "...")`. Returns formatted status including timestamps and error messages.
 
 **PATH not configured**: install.sh auto-configures PATH (v0.4.1+), or manually add `export PATH="$HOME/.swiftpm/bin:$PATH"` to shell config
 

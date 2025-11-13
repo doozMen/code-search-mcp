@@ -973,6 +973,7 @@ enum IndexingError: Error, LocalizedError {
   case directoryEnumerationFailed(String)
   case fileReadingFailed(String, Error)
   case projectNotFound(String)
+  case cancelled
 
   var errorDescription: String? {
     switch self {
@@ -984,6 +985,8 @@ enum IndexingError: Error, LocalizedError {
       return "Failed to read file \(file): \(error)"
     case .projectNotFound(let name):
       return "Project not found in registry: \(name)"
+    case .cancelled:
+      return "Indexing operation was cancelled"
     }
   }
 }
