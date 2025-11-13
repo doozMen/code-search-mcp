@@ -70,6 +70,16 @@ actor MCPServer: Sendable {
         "index_path": "\(indexPath)"
       ])
 
+    // Auto-migrate legacy indexes (silent, runs in background)
+    do {
+      try await self.projectIndexer.autoMigrateLegacyIndexes()
+    } catch {
+      self.logger.warning(
+        "Legacy index migration failed (non-fatal)",
+        metadata: ["error": "\(error)"])
+      // Continue with startup
+    }
+
     // Read projects to index from environment (colon-separated list)
     var allProjectPaths = projectPaths
     if let envProjects = ProcessInfo.processInfo.environment["CODE_SEARCH_PROJECTS"] {
@@ -79,7 +89,7 @@ actor MCPServer: Sendable {
         "Projects from environment",
         metadata: [
           "count": "\(envPaths.count)",
-          "projects": "\(envProjects)"
+          "projects": "\(envProjects)",
         ])
     }
 
