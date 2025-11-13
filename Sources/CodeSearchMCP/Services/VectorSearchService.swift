@@ -132,11 +132,14 @@ actor VectorSearchService: Sendable {
         "scored_results": "\(scoredResults.count)"
       ])
 
-    // Sort by similarity score (highest first) and take top results
-    let topResults =
-      scoredResults
-      .sorted { $0.score > $1.score }
-      .prefix(maxResults)
+    // Sort by similarity score (highest first)
+    let sortedResults = scoredResults.sorted { $0.score > $1.score }
+
+    // Deduplicate by (filePath, startLine), keeping highest scoring result
+    let deduplicatedResults = deduplicateResults(sortedResults)
+
+    // Take top results after deduplication
+    let topResults = deduplicatedResults.prefix(maxResults)
 
     // Convert to SearchResult objects
     let searchResults = topResults.map { scored -> SearchResult in
@@ -155,9 +158,57 @@ actor VectorSearchService: Sendable {
       metadata: [
         "results_returned": "\(searchResults.count)",
         "top_score": searchResults.first.map { "\($0.relevanceScore)" } ?? "N/A",
+        "deduplicated_from": "\(scoredResults.count)"
       ])
 
     return searchResults
+  }
+
+  // MARK: - Deduplication
+
+  /// Deduplicate results by (filePath, startLine), keeping highest scoring result.
+  ///
+  /// When multiple chunks overlap the same code location (same file and start line),
+  /// only the result with the highest similarity score is kept. This prevents
+  /// duplicate results from appearing in search output.
+  ///
+  /// - Parameter results: Scored chunks sorted by score (highest first)
+  /// - Returns: Deduplicated list of scored chunks
+  private func deduplicateResults(_ results: [ScoredChunk]) -> [ScoredChunk] {
+    var seenLocations = Set<String>()
+    var deduplicated: [ScoredChunk] = []
+
+    for scored in results {
+      // Create unique key from file path and start line
+      let locationKey = "\(scored.chunk.filePath):\(scored.chunk.startLine)"
+
+      // Only keep first occurrence (which has highest score due to pre-sorting)
+      if !seenLocations.contains(locationKey) {
+        seenLocations.insert(locationKey)
+        deduplicated.append(scored)
+      } else {
+        logger.debug(
+          "Skipped duplicate result",
+          metadata: [
+            "file": "\(scored.chunk.filePath)",
+            "line": "\(scored.chunk.startLine)",
+            "score": "\(scored.score)",
+            "chunk_id": "\(scored.chunk.id)"
+          ]
+        )
+      }
+    }
+
+    logger.debug(
+      "Deduplication complete",
+      metadata: [
+        "input_count": "\(results.count)",
+        "output_count": "\(deduplicated.count)",
+        "duplicates_removed": "\(results.count - deduplicated.count)"
+      ]
+    )
+
+    return deduplicated
   }
 
   // MARK: - Similarity Computation
