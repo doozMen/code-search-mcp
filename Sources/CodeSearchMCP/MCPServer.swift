@@ -1,6 +1,7 @@
 import Foundation
 import Logging
 import MCP
+import SwiftEmbeddings
 
 /// Main MCP server actor that manages the protocol implementation.
 ///
@@ -36,7 +37,7 @@ actor MCPServer: Sendable {
     // Initialize server metadata
     self.server = Server(
       name: "code-search-mcp",
-      version: "0.3.2",
+      version: "0.4.0-alpha.2",
       capabilities: .init(
         prompts: nil,
         resources: nil,

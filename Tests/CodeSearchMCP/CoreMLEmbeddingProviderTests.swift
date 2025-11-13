@@ -2,6 +2,7 @@ import Foundation
 import Testing
 
 @testable import CodeSearchMCP
+@testable import SwiftEmbeddings
 
 /// Tests for CoreML embedding provider using NaturalLanguage framework.
 ///

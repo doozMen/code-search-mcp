@@ -2,6 +2,7 @@ import Foundation
 import Testing
 
 @testable import CodeSearchMCP
+@testable import SwiftEmbeddings
 
 /// Tests for embedding provider fallback logic.
 ///
@@ -24,9 +25,9 @@ struct EmbeddingProviderFallbackTests {
     #expect(embedding.count == 300)
   }
 
-  @Test("BERT provider dimensions are 384", .disabled("Requires Python server"))
+  @Test("BERT provider dimensions are 384", .disabled("Requires Python server and Linux"))
   func testBERTDimensions() async throws {
-    #if os(Linux)
+    #if !os(macOS)
     let provider = BERTEmbeddingProvider()
 
     #expect(provider.dimensions == 384)
@@ -45,9 +46,9 @@ struct EmbeddingProviderFallbackTests {
     #expect(await service.embeddingDimension == 300)
   }
 
-  @Test("EmbeddingService can use BERT provider", .disabled("Requires Python server"))
+  @Test("EmbeddingService can use BERT provider", .disabled("Requires Python server and Linux"))
   func testEmbeddingServiceWithBERTProvider() async throws {
-    #if os(Linux)
+    #if !os(macOS)
     let tempDir = FileManager.default.temporaryDirectory
       .appendingPathComponent(UUID().uuidString).path
     defer { try? FileManager.default.removeItem(atPath: tempDir) }

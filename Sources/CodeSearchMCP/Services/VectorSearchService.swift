@@ -1,6 +1,7 @@
 import Foundation
 import Logging
 import Accelerate
+import SwiftEmbeddings
 
 // Disambiguate Logger
 typealias SwiftLogger = Logging.Logger

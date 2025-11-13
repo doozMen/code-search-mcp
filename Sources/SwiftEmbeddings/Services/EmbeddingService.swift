@@ -195,7 +195,7 @@ public actor EmbeddingService: Sendable {
   /// Clear all cached embeddings.
   ///
   /// Useful for cache invalidation or cleanup.
-  func clearCache() async throws {
+  public func clearCache() async throws {
     do {
       let files = try fileManager.contentsOfDirectory(atPath: embeddingsCacheDir)
       for file in files where file.hasSuffix(".embedding") {
@@ -219,7 +219,7 @@ public actor EmbeddingService: Sendable {
   ///
   /// - Returns: Cache statistics including hit rate and total embeddings
   /// - Throws: If stats retrieval fails
-  func getCacheStats() async throws -> EmbeddingCacheStats {
+  public func getCacheStats() async throws -> EmbeddingCacheStats {
     // Count cached embeddings
     let cacheFiles: [String]
     if let enumerator = fileManager.enumerator(atPath: embeddingsCacheDir) {
@@ -250,13 +250,13 @@ public actor EmbeddingService: Sendable {
 // MARK: - Statistics Model
 
 /// Statistics about the embedding cache.
-struct EmbeddingCacheStats: Sendable {
-  let indexPath: String
-  let totalEmbeddings: Int
-  let cacheHits: Int
-  let cacheMisses: Int
+public struct EmbeddingCacheStats: Sendable {
+  public let indexPath: String
+  public let totalEmbeddings: Int
+  public let cacheHits: Int
+  public let cacheMisses: Int
 
-  var hitRate: Double {
+  public var hitRate: Double {
     let total = cacheHits + cacheMisses
     return total > 0 ? Double(cacheHits) / Double(total) : 0.0
   }
@@ -264,13 +264,13 @@ struct EmbeddingCacheStats: Sendable {
 
 // MARK: - Error Types
 
-enum EmbeddingError: Error, LocalizedError {
+public enum EmbeddingError: Error, LocalizedError {
   case generationFailed(String)
   case cachingFailed(Error)
   case cacheClearingFailed(Error)
   case modelInitializationFailed
 
-  var errorDescription: String? {
+  public var errorDescription: String? {
     switch self {
     case .generationFailed(let reason):
       return "Embedding generation failed: \(reason)"
