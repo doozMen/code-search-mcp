@@ -9,7 +9,7 @@ import Foundation
 /// Structure:
 /// - Metadata: project, file path, language, line numbers
 /// - Content: the actual source code
-/// - Embedding: 384-dimensional BERT embedding vector
+/// - Embedding: vector embedding (300-dim CoreML or 384-dim BERT)
 /// - Classification: chunk type (function, class, block, etc.)
 struct CodeChunk: Sendable, Codable {
   /// Unique identifier for this chunk
@@ -36,7 +36,7 @@ struct CodeChunk: Sendable, Codable {
   /// Type of chunk: "function", "class", "struct", "method", "block", "file"
   let chunkType: String
 
-  /// 384-dimensional BERT embedding vector (nil until computed)
+  /// Vector embedding (300-dim CoreML on macOS, 384-dim BERT on Linux, nil until computed)
   let embedding: [Float]?
 
   /// Optional human-readable description of the chunk

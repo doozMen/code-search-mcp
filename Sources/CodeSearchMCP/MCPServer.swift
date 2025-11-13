@@ -144,7 +144,7 @@ actor MCPServer: Sendable {
       Tool(
         name: "semantic_search",
         description:
-          "Search for code patterns using semantic similarity with 384-dimensional embeddings",
+          "Search for code patterns using semantic similarity with CoreML (300-dim, macOS) or BERT (384-dim, Linux) embeddings",
         inputSchema: .object([
           "type": "object",
           "properties": .object([

@@ -6,21 +6,21 @@ import MCP
 /// Main entry point for the code-search-mcp server.
 ///
 /// This command-line tool initializes and runs an MCP server that provides
-/// semantic and keyword-based code search across multiple codebases.
+/// pure vector-based semantic code search across multiple codebases.
 ///
 /// Features:
-/// - Semantic search using 384-dimensional BERT embeddings
-/// - Keyword-based symbol and file search
+/// - Semantic search using 300-dimensional CoreML embeddings (macOS) or 384-dimensional BERT embeddings (Linux)
 /// - File context extraction with dependency tracking
 /// - Related file discovery through import analysis
 /// - Index metadata and statistics
+/// - Auto-indexing setup with git hooks and direnv
 @main
 struct CodeSearchMCP: AsyncParsableCommand {
   static let configuration = CommandConfiguration(
     commandName: "code-search-mcp",
     abstract: "MCP server for semantic code search across multiple projects",
     discussion: """
-      Provides MCP tools for semantic search, keyword search, file context extraction,
+      Provides MCP tools for pure vector-based semantic search, file context extraction,
       and dependency graph analysis across indexed codebases.
       """,
     version: "0.4.2",

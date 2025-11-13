@@ -2,12 +2,11 @@ import Foundation
 
 /// Represents a search result returned by any search service.
 ///
-/// Unified result type used by semantic search, keyword search, and file context queries.
+/// Unified result type used by semantic search and file context queries.
 /// Includes the found code, its location, relevance score, and additional metadata.
 ///
 /// Result Types:
 /// - Semantic search: Ranked by cosine similarity (0-1 score)
-/// - Keyword search: Ranked by match type and frequency
 /// - File context: Single result with specified line range
 struct SearchResult: Sendable, Codable {
   /// Unique identifier for this result
