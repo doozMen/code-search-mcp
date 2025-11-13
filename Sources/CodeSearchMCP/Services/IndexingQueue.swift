@@ -16,9 +16,9 @@ actor IndexingQueue: Sendable {
 
   /// Priority level for indexing jobs.
   enum JobPriority: Int {
-    case low = 0      // Background hook-triggered indexing
-    case normal = 1   // User-initiated reload via MCP tool
-    case high = 2     // Emergency re-index after migration or errors
+    case low = 0  // Background hook-triggered indexing
+    case normal = 1  // User-initiated reload via MCP tool
+    case high = 2  // Emergency re-index after migration or errors
 
     /// Comparison for priority queue ordering (higher = sooner).
     func comparePriority(to other: JobPriority) -> Bool {
@@ -46,6 +46,7 @@ actor IndexingQueue: Sendable {
     let error: String?
     let fileCount: Int?
     let chunkCount: Int?
+    var onComplete: (@Sendable (Result<(Int, Int), Error>) -> Void)?
   }
 
   // MARK: - Properties
@@ -70,6 +71,7 @@ actor IndexingQueue: Sendable {
     let priority: JobPriority
     let createdAt: Date
     let operation: @Sendable () async throws -> (fileCount: Int, chunkCount: Int)
+    let onComplete: (@Sendable (Result<(Int, Int), Error>) -> Void)?
   }
 
   private struct RunningJob {
@@ -79,6 +81,7 @@ actor IndexingQueue: Sendable {
     let createdAt: Date
     let startedAt: Date
     let task: Task<(fileCount: Int, chunkCount: Int), Error>
+    let onComplete: (@Sendable (Result<(Int, Int), Error>) -> Void)?
   }
 
   // MARK: - Initialization
@@ -103,11 +106,13 @@ actor IndexingQueue: Sendable {
   ///   - projectName: Optional project name (for single-project re-index)
   ///   - priority: Job priority level (affects order)
   ///   - operation: Async closure that performs indexing and returns file/chunk counts
+  ///   - onComplete: Optional callback invoked when job completes (success or failure)
   /// - Returns: Job ID for tracking progress
   func enqueue(
     projectName: String? = nil,
     priority: JobPriority = .normal,
-    operation: @escaping @Sendable () async throws -> (fileCount: Int, chunkCount: Int)
+    operation: @escaping @Sendable () async throws -> (fileCount: Int, chunkCount: Int),
+    onComplete: (@Sendable (Result<(Int, Int), Error>) -> Void)? = nil
   ) -> JobID {
     let jobID = UUID()
     let queuedJob = QueuedJob(
@@ -115,13 +120,15 @@ actor IndexingQueue: Sendable {
       projectName: projectName,
       priority: priority,
       createdAt: Date(),
-      operation: operation
+      operation: operation,
+      onComplete: onComplete
     )
 
     // Insert into queue sorted by priority (highest first)
-    let insertIndex = pendingJobs.firstIndex { existingJob in
-      !priority.comparePriority(to: existingJob.priority)
-    } ?? pendingJobs.count
+    let insertIndex =
+      pendingJobs.firstIndex { existingJob in
+        !priority.comparePriority(to: existingJob.priority)
+      } ?? pendingJobs.count
 
     pendingJobs.insert(queuedJob, at: insertIndex)
 
@@ -223,7 +230,8 @@ actor IndexingQueue: Sendable {
     }
 
     // Add completed jobs (most recent first)
-    jobs.append(contentsOf: completedJobs.sorted { $0.completedAt ?? Date() > $1.completedAt ?? Date() })
+    jobs.append(
+      contentsOf: completedJobs.sorted { $0.completedAt ?? Date() > $1.completedAt ?? Date() })
 
     return jobs
   }
@@ -235,6 +243,27 @@ actor IndexingQueue: Sendable {
       active: activeJobs.count,
       completed: completedJobs.count
     )
+  }
+
+  /// Check if the queue is completely idle (no pending, no active jobs).
+  ///
+  /// Useful for CLI modes that need to exit after all indexing completes.
+  ///
+  /// - Returns: True if no jobs are pending or active, false otherwise
+  func isIdle() -> Bool {
+    return pendingJobs.isEmpty && activeJobs.isEmpty
+  }
+
+  /// Wait until the queue becomes idle (all jobs completed).
+  ///
+  /// Polls the queue state at regular intervals until no jobs remain.
+  /// Useful for CLI modes that need to block until indexing finishes.
+  ///
+  /// - Parameter checkInterval: How often to check for idle state (default: 100ms)
+  func waitUntilIdle(checkInterval: Duration = .milliseconds(100)) async {
+    while !isIdle() {
+      try? await Task.sleep(for: checkInterval)
+    }
   }
 
   // MARK: - Private Methods
@@ -252,7 +281,8 @@ actor IndexingQueue: Sendable {
         startedAt: Date(),
         task: Task {
           try await queuedJob.operation()
-        }
+        },
+        onComplete: queuedJob.onComplete
       )
 
       activeJobs[queuedJob.id] = runningJob
@@ -308,6 +338,9 @@ actor IndexingQueue: Sendable {
         ]
       )
 
+      // Invoke completion callback if provided
+      runningJob.onComplete?(.success((result.fileCount, result.chunkCount)))
+
       // Process more jobs from queue
       await processQueue()
     } catch {
@@ -340,6 +373,9 @@ actor IndexingQueue: Sendable {
           "error": "\(error)",
         ]
       )
+
+      // Invoke completion callback if provided
+      runningJob.onComplete?(.failure(error))
 
       // Process more jobs from queue even after failure
       await processQueue()

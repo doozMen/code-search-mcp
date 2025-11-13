@@ -5,7 +5,7 @@ import Logging
 /// Command to configure automatic re-indexing using git hooks and direnv.
 ///
 /// This command generates and installs:
-/// - `.envrc` - direnv configuration for automatic re-indexing on directory entry
+/// - `.envrc` - direnv configuration with environment variables for MCP server
 /// - `.githooks/post-commit` - Re-index after committing changes
 /// - `.githooks/post-merge` - Re-index after pulling/merging
 /// - `.githooks/post-checkout` - Re-index after branch switching
@@ -17,21 +17,21 @@ struct SetupHooksCommand: AsyncParsableCommand {
     discussion: """
       This command sets up automatic re-indexing for code-search-mcp using:
 
-      1. direnv (.envrc) - Re-indexes when entering the directory
+      1. direnv (.envrc) - Sets environment variables for the MCP server
       2. Git hooks (.githooks/) - Re-indexes after git operations
 
-      The hooks run in the background and won't block your workflow.
+      The git hooks run in the background and won't block your workflow.
 
       Examples:
         # Setup in current directory
         code-search-mcp setup-hooks
-        
+
         # Setup for specific project
         code-search-mcp setup-hooks --project-path ~/my-project
-        
+
         # Skip direnv setup
         code-search-mcp setup-hooks --no-direnv
-        
+
         # Install hooks immediately with git config
         code-search-mcp setup-hooks --install-hooks
       """
@@ -187,23 +187,15 @@ struct SetupHooksCommand: AsyncParsableCommand {
 
     let content = """
       # direnv configuration for \(projectName) code search indexing
-      # Automatically re-indexes code when entering this directory
+      # Sets environment variables for code-search-mcp MCP server
 
       # Set the project name for code-search-mcp
       export CODE_SEARCH_PROJECT_NAME="\(projectName)"
       export CODE_SEARCH_PROJECT_PATH="$PWD"
 
-      # Trigger re-indexing in the background (won't block terminal)
-      BINARY="$HOME/.swiftpm/bin/code-search-mcp"
-
-      if [ -x "$BINARY" ]; then
-        echo "📚 code-search-mcp: Re-indexing \(projectName)..."
-        ("$BINARY" --log-level info --project-paths "$PWD" > /tmp/code-search-mcp-$$.log 2>&1 &)
-        echo "   (Indexing in background, check /tmp/code-search-mcp-$$.log for progress)"
-      else
-        echo "⚠️  code-search-mcp not found at $BINARY"
-        echo "    Install with: cd ~/Developer/code-search-mcp && ./install.sh"
-      fi
+      # Note: Re-index manually using git hooks or:
+      #   code-search-mcp index --project-paths . --exit-after-indexing
+      # (--exit-after-indexing flag not yet implemented, coming soon)
 
       """
 

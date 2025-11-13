@@ -204,15 +204,51 @@ indexing_progress()  # Shows queued, active, completed
 
 ## CLI Commands
 
+### Daemon Mode (MCP Server)
+
 ```bash
-# Run MCP server
+# Run MCP server (long-running, stdio protocol)
 code-search-mcp
 
-# Setup auto-indexing
-code-search-mcp setup-hooks --install-hooks
-
-# With project paths
+# Run MCP server with auto-indexing on startup
 code-search-mcp --project-paths ~/project1 --project-paths ~/project2
+```
+
+### One-Shot Indexing Mode (v0.5.1+)
+
+Index projects and exit cleanly without starting the MCP server. Useful for:
+- Manual indexing from command line
+- CI/CD pipelines
+- Batch indexing scripts
+- Testing indexing performance
+
+```bash
+# Index current directory
+code-search-mcp index .
+
+# Index multiple projects
+code-search-mcp index ~/project1 ~/project2
+
+# Debug mode
+code-search-mcp index ~/myproject --log-level debug
+
+# Custom cache location
+code-search-mcp index ~/myproject --index-path ~/.custom-cache
+```
+
+**Key Features**:
+- Returns immediately with job IDs
+- Polls IndexingQueue until all jobs complete
+- Shows progress (active/pending/completed)
+- Prints summary with file/chunk counts
+- Exits with proper status code (0=success, 1=failure)
+- Never starts stdio MCP server (pure CLI mode)
+
+### Auto-Indexing Setup
+
+```bash
+# Setup git hooks and direnv
+code-search-mcp setup-hooks --install-hooks
 ```
 
 ## Environment Variables

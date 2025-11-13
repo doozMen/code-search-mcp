@@ -25,7 +25,7 @@ struct CodeSearchMCP: AsyncParsableCommand {
       and dependency graph analysis across indexed codebases.
       """,
     version: "0.5.1-alpha.1",
-    subcommands: [SetupHooksCommand.self]
+    subcommands: [IndexCommand.self, SetupHooksCommand.self]
   )
 
   // MARK: - Configuration Options
