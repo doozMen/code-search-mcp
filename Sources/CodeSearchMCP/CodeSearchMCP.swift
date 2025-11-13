@@ -2,6 +2,7 @@ import ArgumentParser
 import Foundation
 import Logging
 import MCP
+import UnixSignals
 
 /// Main entry point for the code-search-mcp server.
 ///
@@ -73,7 +74,34 @@ struct CodeSearchMCP: AsyncParsableCommand {
         indexPath: indexPath,
         projectPaths: projectPaths
       )
-      try await server.run()
+
+      // Run server and signal handler concurrently
+      await withTaskGroup(of: Void.self) { group in
+        // Task 1: Run the MCP server
+        group.addTask {
+          do {
+            try await server.run()
+          } catch {
+            logger.error("Server error: \(error)")
+          }
+        }
+
+        // Task 2: Listen for shutdown signals (SIGINT, SIGTERM)
+        group.addTask {
+          for await signal in await UnixSignalsSequence(trapping: .sigint, .sigterm) {
+            logger.info("Received \(signal), initiating graceful shutdown...")
+
+            // Request server to stop accepting new work
+            await server.requestShutdown()
+
+            // Allow brief cleanup period (flush buffers, close connections)
+            try? await Task.sleep(for: .seconds(1))
+
+            logger.info("Shutdown complete")
+            Foundation.exit(EXIT_SUCCESS)
+          }
+        }
+      }
     } catch {
       logger.error(
         "Failed to start server",

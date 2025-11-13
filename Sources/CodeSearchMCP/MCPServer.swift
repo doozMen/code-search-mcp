@@ -20,6 +20,7 @@ actor MCPServer: Sendable {
   private let vectorSearchService: VectorSearchService
   private let codeMetadataExtractor: CodeMetadataExtractor
   private let defaultProjectFilter: String?
+  private var isShuttingDown = false
 
   // MARK: - Initialization
 
@@ -143,6 +144,15 @@ actor MCPServer: Sendable {
 
     // Wait for completion
     await server.waitUntilCompleted()
+  }
+
+  /// Request graceful shutdown of the server.
+  ///
+  /// Sets the shutdown flag to signal any in-progress operations to stop cleanly.
+  /// Called when SIGINT or SIGTERM is received.
+  func requestShutdown() {
+    isShuttingDown = true
+    logger.info("Shutdown requested - no new operations will be accepted")
   }
 
   // MARK: - Tool Handlers
