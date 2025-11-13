@@ -176,7 +176,8 @@ actor CodeMetadataExtractor: Sendable {
   /// Looks for:
   /// - import statements
   private func extractSwiftDependencies(from content: String, filePath: String) -> [Dependency] {
-    // TODO: Use regex to find "import X" statements
+    // TODO #26: Use regex to find "import X" statements for Python/JS/Java
+    // https://github.com/doozMen/code-search-mcp/issues/26
     // Pattern: ^import\s+(\w+)
     var dependencies: [Dependency] = []
 

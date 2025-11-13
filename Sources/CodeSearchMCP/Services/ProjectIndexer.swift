@@ -352,7 +352,8 @@ actor ProjectIndexer: Sendable {
     let language = supportedExtensions[pathExtension] ?? "Unknown"
 
     // For now, implement simple line-based chunking
-    // TODO: Add language-specific AST-based chunking for better structure detection
+    // TODO #25: Add language-specific AST-based chunking for better structure detection
+    // https://github.com/doozMen/code-search-mcp/issues/25
     let chunks = createLineBasedChunks(
       content: content,
       filePath: filePath,

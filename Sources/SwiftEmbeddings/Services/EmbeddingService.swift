@@ -237,7 +237,8 @@ public actor EmbeddingService: Sendable {
       ])
 
     // For now, return stats without hit/miss tracking
-    // TODO: Add actual hit/miss tracking in future
+    // TODO #24: Add actual hit/miss tracking in future
+    // https://github.com/doozMen/code-search-mcp/issues/24
     return EmbeddingCacheStats(
       indexPath: embeddingsCacheDir,
       totalEmbeddings: totalEmbeddings,
