@@ -338,6 +338,55 @@ actor ProjectIndexer: Sendable {
     return projectRegistry.allProjects().filter { $0.fileCount > legacyThreshold }
   }
 
+  /// Migrate a single project by clearing its old chunks and re-indexing.
+  ///
+  /// This is useful for background migration jobs. Clears old chunks, unregisters
+  /// the project from the registry, and re-indexes with current detection logic.
+  ///
+  /// - Parameters:
+  ///   - projectName: Name of the project to migrate
+  ///   - rootPath: Root path of the project
+  /// - Returns: Tuple of (fileCount, chunkCount) after re-indexing
+  /// - Throws: IndexingError if migration fails
+  func migrateProject(name projectName: String, rootPath: String) async throws -> (
+    fileCount: Int, chunkCount: Int
+  ) {
+    logger.info(
+      "Migrating project",
+      metadata: [
+        "project": "\(projectName)",
+        "path": "\(rootPath)",
+      ])
+
+    // Clear old chunks
+    let chunksDir = (indexPath as NSString).appendingPathComponent("chunks/\(projectName)")
+    if fileManager.fileExists(atPath: chunksDir) {
+      try fileManager.removeItem(atPath: chunksDir)
+      logger.debug("Cleared old chunks", metadata: ["project": "\(projectName)"])
+    }
+
+    // Unregister old project
+    projectRegistry.unregister(projectName)
+    try saveProjectRegistry()
+
+    // Re-index with new detection logic
+    try await indexProject(path: rootPath)
+
+    // Get new project stats
+    if let newProject = projectRegistry.allProjects().first(where: { $0.name == projectName }) {
+      logger.info(
+        "Project migration complete",
+        metadata: [
+          "project": "\(projectName)",
+          "files": "\(newProject.fileCount)",
+          "chunks": "\(newProject.chunkCount)",
+        ])
+      return (fileCount: newProject.fileCount, chunkCount: newProject.chunkCount)
+    }
+
+    return (fileCount: 0, chunkCount: 0)
+  }
+
   /// Automatically migrate legacy indexes by re-indexing with subproject detection.
   ///
   /// This is called silently at startup to fix indexes created before subproject detection

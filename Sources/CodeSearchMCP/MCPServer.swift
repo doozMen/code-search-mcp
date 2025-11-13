@@ -74,14 +74,39 @@ actor MCPServer: Sendable {
         "index_path": "\(indexPath)"
       ])
 
-    // Auto-migrate legacy indexes (silent, runs in background)
-    do {
-      try await self.projectIndexer.autoMigrateLegacyIndexes()
-    } catch {
-      self.logger.warning(
-        "Legacy index migration failed (non-fatal)",
-        metadata: ["error": "\(error)"])
-      // Continue with startup
+    // Queue auto-migration for legacy indexes (runs in background with high priority)
+    let legacyProjects = await self.projectIndexer.detectLegacyIndexes()
+    if !legacyProjects.isEmpty {
+      self.logger.info(
+        "Detected legacy indexes, queuing for migration",
+        metadata: [
+          "legacy_count": "\(legacyProjects.count)",
+          "projects": "\(legacyProjects.map { $0.name }.joined(separator: ", "))",
+        ])
+
+      for project in legacyProjects {
+        let jobID = await indexingQueue.enqueue(
+          projectName: project.name,
+          priority: .high  // High priority for migrations
+        ) { [weak self] in
+          guard let self = self else { throw IndexingError.cancelled }
+
+          // Use ProjectIndexer's migrateProject() method
+          let result = try await self.projectIndexer.migrateProject(
+            name: project.name,
+            rootPath: project.rootPath
+          )
+
+          return result
+        }
+
+        self.logger.info(
+          "Legacy index migration queued",
+          metadata: [
+            "project": "\(project.name)",
+            "job_id": "\(jobID.uuidString)",
+          ])
+      }
     }
 
     // Read projects to index from environment (colon-separated list)
@@ -97,29 +122,37 @@ actor MCPServer: Sendable {
         ])
     }
 
-    // Index initial projects if provided
+    // Queue initial projects for background indexing
     if !allProjectPaths.isEmpty {
       self.logger.info(
-        "Indexing projects",
+        "Queuing projects for background indexing",
         metadata: [
           "count": "\(allProjectPaths.count)"
         ])
       for projectPath in allProjectPaths {
-        do {
+        let jobID = await indexingQueue.enqueue(
+          projectName: (projectPath as NSString).lastPathComponent,
+          priority: .low
+        ) { [weak self] in
+          guard let self = self else { throw IndexingError.cancelled }
           try await self.projectIndexer.indexProject(path: projectPath)
-          self.logger.info(
-            "Project indexed",
-            metadata: [
-              "path": "\(projectPath)"
-            ])
-        } catch {
-          self.logger.warning(
-            "Failed to index project",
-            metadata: [
-              "path": "\(projectPath)",
-              "error": "\(error)",
-            ])
+
+          // Get project info to return file/chunk counts
+          let projectName = (projectPath as NSString).lastPathComponent
+          if let projects = await self.projectIndexer.getIndexedProjects()
+            .first(where: { $0.name == projectName })
+          {
+            return (fileCount: projects.fileCount, chunkCount: projects.chunkCount)
+          }
+          return (fileCount: 0, chunkCount: 0)
         }
+
+        self.logger.info(
+          "Project queued for indexing",
+          metadata: [
+            "path": "\(projectPath)",
+            "job_id": "\(jobID.uuidString)",
+          ])
       }
     }
   }
