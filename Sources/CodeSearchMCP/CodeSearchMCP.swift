@@ -23,7 +23,7 @@ struct CodeSearchMCP: AsyncParsableCommand {
       Provides MCP tools for semantic search, keyword search, file context extraction,
       and dependency graph analysis across indexed codebases.
       """,
-    version: "0.4.2-alpha.1",
+    version: "0.4.2",
     subcommands: [SetupHooksCommand.self]
   )
 
