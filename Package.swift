@@ -8,7 +8,11 @@ let package = Package(
     .executable(
       name: "code-search-mcp",
       targets: ["CodeSearchMCP"]
-    )
+    ),
+    .library(
+      name: "SwiftEmbeddings",
+      targets: ["SwiftEmbeddings"]
+    ),
   ],
   dependencies: [
     // MCP Protocol Support
@@ -33,9 +37,17 @@ let package = Package(
     ),
   ],
   targets: [
+    .target(
+      name: "SwiftEmbeddings",
+      dependencies: [
+        .product(name: "Logging", package: "swift-log"),
+      ],
+      path: "Sources/SwiftEmbeddings"
+    ),
     .executableTarget(
       name: "CodeSearchMCP",
       dependencies: [
+        "SwiftEmbeddings",
         .product(name: "MCP", package: "swift-sdk"),
         .product(name: "Logging", package: "swift-log"),
         .product(name: "ArgumentParser", package: "swift-argument-parser"),
