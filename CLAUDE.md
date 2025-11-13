@@ -209,10 +209,9 @@ indexing_progress()  # Shows queued, active, completed
 ```bash
 # Run MCP server (long-running, stdio protocol)
 code-search-mcp
-
-# Run MCP server with auto-indexing on startup
-code-search-mcp --project-paths ~/project1 --project-paths ~/project2
 ```
+
+For auto-indexing on startup, use environment variables or the IndexCommand subcommand instead.
 
 ### One-Shot Indexing Mode (v0.5.1+)
 

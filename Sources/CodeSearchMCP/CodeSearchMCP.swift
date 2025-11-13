@@ -46,13 +46,6 @@ struct CodeSearchMCP: AsyncParsableCommand {
   var indexPath: String =
     "\(FileManager.default.homeDirectoryForCurrentUser.path)/.cache/code-search-mcp"
 
-  /// Optional project directories to index (can be specified multiple times).
-  @Option(
-    name: .long,
-    help: "Project directory to index (can be specified multiple times)"
-  )
-  var projectPaths: [String] = []
-
   // MARK: - Async Command Execution
 
   func run() async throws {
@@ -72,7 +65,7 @@ struct CodeSearchMCP: AsyncParsableCommand {
     do {
       let server = try await MCPServer(
         indexPath: indexPath,
-        projectPaths: projectPaths
+        projectPaths: []
       )
 
       // Run server and signal handler concurrently
