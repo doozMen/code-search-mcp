@@ -21,5 +21,8 @@
     "simd",
     "mac-studio"
   ],
-  "mcpServers": "./.mcp.json"
+  "mcpServers": "./.mcp.json",
+  "hooks": {
+    "beforeToolCall": "./hooks/beforeToolCall.js"
+  }
 }
