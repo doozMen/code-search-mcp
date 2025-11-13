@@ -22,7 +22,5 @@
     "mac-studio"
   ],
   "mcpServers": "./.mcp.json",
-  "hooks": {
-    "beforeToolCall": "./hooks/beforeToolCall.js"
-  }
+  "hooks": "./hooks/hooks.json"
 }
