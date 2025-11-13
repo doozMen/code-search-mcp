@@ -41,12 +41,18 @@ actor EmbeddingService: Sendable {
     self.embeddingsCacheDir = (indexPath as NSString).appendingPathComponent("embeddings")
     self.logger = Logger(label: "embedding-service")
 
-    // Use provided provider or create default (CoreML)
+    // Use provided provider or create default (platform-specific)
     if let provider = provider {
       self.provider = provider
     } else {
-      // Default to CoreML provider
+      // Default to CoreML provider on macOS, BERT on Linux
+      #if os(macOS)
       self.provider = try CoreMLEmbeddingProvider()
+      #elseif os(Linux)
+      self.provider = BERTEmbeddingProvider()
+      #else
+      throw EmbeddingProviderError.noPlatformProvider
+      #endif
     }
 
     // Create embeddings cache directory

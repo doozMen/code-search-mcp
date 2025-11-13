@@ -1,3 +1,6 @@
+// BERT Provider is only available on Linux (not used on macOS - CoreML is primary)
+#if os(Linux)
+
 import Foundation
 import Logging
 
@@ -311,3 +314,5 @@ enum BERTProviderError: Error, LocalizedError {
     }
   }
 }
+
+#endif // os(Linux)
