@@ -452,7 +452,7 @@ actor MCPServer: Sendable {
       "  - Hit rate: \(String(format: "%.1f%%", embeddingStats.hitRate * 100))",
       "",
       "Configuration:",
-      "  - Embedding model: BERT (384-dimensional)",
+      "  - Embedding model: CoreML (300-dim, macOS) or BERT (384-dim, Linux)",
       "  - Search type: Vector-based semantic search only",
       "  - Index path: \(embeddingStats.indexPath)",
       "  - Status: Active",
