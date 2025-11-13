@@ -36,7 +36,7 @@ actor MCPServer: Sendable {
     // Initialize server metadata
     self.server = Server(
       name: "code-search-mcp",
-      version: "0.3.1",
+      version: "0.3.2",
       capabilities: .init(
         prompts: nil,
         resources: nil,
