@@ -173,6 +173,8 @@ vDSP_svesq(a, 1, &magnitudeSquared, count)     // Magnitude
 **Duplicate results**: Fixed in v0.3.2 with deduplication logic
 **Project not indexed**: Use `CODE_SEARCH_PROJECTS` env var or `--project-paths` CLI arg
 **Stale results**: Run `reload_index` tool or setup auto-indexing with `setup-hooks`
+**PATH not configured**: install.sh auto-configures PATH (v0.4.1+), or manually add `export PATH="$HOME/.swiftpm/bin:$PATH"` to shell config
+**Git hooks not triggering**: Use `code-search-mcp setup-hooks --install-hooks` which generates hooks with full paths (works in SSH/non-interactive shells)
 
 ## Version Management
 
