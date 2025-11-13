@@ -73,13 +73,14 @@ actor CoreMLEmbeddingProvider: EmbeddingProvider {
         
         // Tokenize text into words
         let tokenizer = NLTokenizer(unit: .word)
-        tokenizer.string = text.lowercased()
-        
+        let lowercasedText = text.lowercased()
+        tokenizer.string = lowercasedText
+
         var wordVectors: [[Double]] = []
-        
+
         // Extract word embeddings
-        tokenizer.enumerateTokens(in: text.startIndex..<text.endIndex) { range, _ in
-            let word = String(text[range])
+        tokenizer.enumerateTokens(in: lowercasedText.startIndex..<lowercasedText.endIndex) { range, _ in
+            let word = String(lowercasedText[range])
             
             // Skip very short words and common code symbols
             guard word.count > 1, !word.allSatisfy({ $0.isPunctuation }) else {
