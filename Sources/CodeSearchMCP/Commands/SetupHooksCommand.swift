@@ -194,12 +194,15 @@ struct SetupHooksCommand: AsyncParsableCommand {
       export CODE_SEARCH_PROJECT_PATH="$PWD"
 
       # Trigger re-indexing in the background (won't block terminal)
-      if command -v code-search-mcp &> /dev/null; then
+      BINARY="$HOME/.swiftpm/bin/code-search-mcp"
+
+      if [ -x "$BINARY" ]; then
         echo "📚 code-search-mcp: Re-indexing \(projectName)..."
-        (code-search-mcp --log-level info --project-paths "$PWD" > /tmp/code-search-mcp-$$.log 2>&1 &)
+        ("$BINARY" --log-level info --project-paths "$PWD" > /tmp/code-search-mcp-$$.log 2>&1 &)
         echo "   (Indexing in background, check /tmp/code-search-mcp-$$.log for progress)"
       else
-        echo "⚠️  code-search-mcp not found in PATH"
+        echo "⚠️  code-search-mcp not found at $BINARY"
+        echo "    Install with: cd ~/Developer/code-search-mcp && ./install.sh"
       fi
 
       """
@@ -398,11 +401,14 @@ struct SetupHooksCommand: AsyncParsableCommand {
     # Get the project directory (works for both regular repos and submodules)
     PROJECT_DIR="$(git rev-parse --show-toplevel)"
 
-    if command -v code-search-mcp &> /dev/null; then
+    BINARY="$HOME/.swiftpm/bin/code-search-mcp"
+
+    if [ -x "$BINARY" ]; then
       echo "📚 [post-commit] Re-indexing after commit..."
-      (code-search-mcp --log-level info --project-paths "$PROJECT_DIR" > /tmp/code-search-mcp-post-commit.log 2>&1 &)
+      ("$BINARY" --log-level info --project-paths "$PROJECT_DIR" > /tmp/code-search-mcp-post-commit.log 2>&1 &)
     else
-      echo "⚠️  code-search-mcp not found, skipping re-index"
+      echo "⚠️  code-search-mcp not found at $BINARY"
+      echo "    Install with: cd ~/Developer/code-search-mcp && ./install.sh"
     fi
 
     """
@@ -416,11 +422,14 @@ struct SetupHooksCommand: AsyncParsableCommand {
     # Get the project directory (works for both regular repos and submodules)
     PROJECT_DIR="$(git rev-parse --show-toplevel)"
 
-    if command -v code-search-mcp &> /dev/null; then
+    BINARY="$HOME/.swiftpm/bin/code-search-mcp"
+
+    if [ -x "$BINARY" ]; then
       echo "📚 [post-merge] Re-indexing after pull/merge..."
-      (code-search-mcp --log-level info --project-paths "$PROJECT_DIR" > /tmp/code-search-mcp-post-merge.log 2>&1 &)
+      ("$BINARY" --log-level info --project-paths "$PROJECT_DIR" > /tmp/code-search-mcp-post-merge.log 2>&1 &)
     else
-      echo "⚠️  code-search-mcp not found, skipping re-index"
+      echo "⚠️  code-search-mcp not found at $BINARY"
+      echo "    Install with: cd ~/Developer/code-search-mcp && ./install.sh"
     fi
 
     """
@@ -434,13 +443,16 @@ struct SetupHooksCommand: AsyncParsableCommand {
     # Get the project directory (works for both regular repos and submodules)
     PROJECT_DIR="$(git rev-parse --show-toplevel)"
 
+    BINARY="$HOME/.swiftpm/bin/code-search-mcp"
+
     # $3 is 1 if it's a branch checkout, 0 if it's a file checkout
     if [ "$3" = "1" ]; then
-      if command -v code-search-mcp &> /dev/null; then
+      if [ -x "$BINARY" ]; then
         echo "📚 [post-checkout] Re-indexing after branch switch..."
-        (code-search-mcp --log-level info --project-paths "$PROJECT_DIR" > /tmp/code-search-mcp-post-checkout.log 2>&1 &)
+        ("$BINARY" --log-level info --project-paths "$PROJECT_DIR" > /tmp/code-search-mcp-post-checkout.log 2>&1 &)
       else
-        echo "⚠️  code-search-mcp not found, skipping re-index"
+        echo "⚠️  code-search-mcp not found at $BINARY"
+        echo "    Install with: cd ~/Developer/code-search-mcp && ./install.sh"
       fi
     fi
 

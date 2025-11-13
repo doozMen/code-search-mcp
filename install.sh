@@ -51,6 +51,54 @@ else
     exit 1
 fi
 
+# Configure PATH
+echo ""
+echo "Configuring PATH..."
+
+# Detect shell
+CURRENT_SHELL=$(basename "$SHELL")
+CONFIG_FILE=""
+PATH_LINE='export PATH="$HOME/.swiftpm/bin:$PATH"'
+
+case "$CURRENT_SHELL" in
+  zsh)
+    CONFIG_FILE="$HOME/.zshrc"
+    ;;
+  bash)
+    if [ -f "$HOME/.bash_profile" ]; then
+      CONFIG_FILE="$HOME/.bash_profile"
+    else
+      CONFIG_FILE="$HOME/.bashrc"
+    fi
+    ;;
+  fish)
+    CONFIG_FILE="$HOME/.config/fish/config.fish"
+    PATH_LINE='set -gx PATH $HOME/.swiftpm/bin $PATH'
+    mkdir -p "$HOME/.config/fish"
+    ;;
+  *)
+    echo -e "${YELLOW}Unknown shell: $CURRENT_SHELL${NC}"
+    echo "Manually add to your shell config:"
+    echo '  export PATH="$HOME/.swiftpm/bin:$PATH"'
+    CONFIG_FILE=""
+    ;;
+esac
+
+# Add PATH if not already configured
+if [ -n "$CONFIG_FILE" ]; then
+  if grep -q '.swiftpm/bin' "$CONFIG_FILE" 2>/dev/null; then
+    echo -e "${GREEN}PATH already configured in $CONFIG_FILE${NC}"
+  else
+    echo "" >> "$CONFIG_FILE"
+    echo "# Added by code-search-mcp installer" >> "$CONFIG_FILE"
+    echo "$PATH_LINE" >> "$CONFIG_FILE"
+    echo -e "${GREEN}Added ~/.swiftpm/bin to PATH in $CONFIG_FILE${NC}"
+    echo ""
+    echo -e "${YELLOW}⚡ To use immediately, run: source $CONFIG_FILE${NC}"
+    echo "   Or open a new terminal window"
+  fi
+fi
+
 # Verify installation
 echo ""
 echo "Verifying installation..."
@@ -59,10 +107,17 @@ if command -v code-search-mcp &> /dev/null; then
     VERSION=$(code-search-mcp --version 2>&1 || echo "unknown")
     echo "Installed version: $VERSION"
 else
-    echo -e "${YELLOW}Warning: code-search-mcp not found in PATH${NC}"
-    echo "Make sure ~/.swiftpm/bin is in your PATH:"
-    echo "  export PATH=\"\$HOME/.swiftpm/bin:\$PATH\""
-    exit 1
+    echo -e "${YELLOW}Note: code-search-mcp will be available after sourcing shell config${NC}"
+    if [ -n "$CONFIG_FILE" ]; then
+        echo "Run: source $CONFIG_FILE"
+    fi
+    # Check if binary exists in the expected location
+    if [ -f ~/.swiftpm/bin/code-search-mcp ]; then
+        echo -e "${GREEN}Binary installed at ~/.swiftpm/bin/code-search-mcp${NC}"
+    else
+        echo -e "${RED}Error: Binary not found at ~/.swiftpm/bin/code-search-mcp${NC}"
+        exit 1
+    fi
 fi
 
 # Print configuration instructions
