@@ -1,7 +1,7 @@
 {
   "name": "code-search-mcp",
   "description": "Pure vector-based semantic code search with CoreML embeddings (primary, 4,172 emb/sec) and BERT fallback. SIMD-optimized for Mac Studio with direnv integration. Multi-project support.",
-  "version": "0.5.0",
+  "version": "0.5.1-alpha.1",
   "author": {
     "name": "PromptPing",
     "email": "stijn@dooz.be",
