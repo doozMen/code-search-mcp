@@ -7,6 +7,7 @@ import Testing
 ///
 /// These tests verify the Python server integration and embedding generation.
 /// They require Python 3.8+ and sentence-transformers to be installed.
+#if os(Linux)
 @Suite("BERT Embedding Provider Tests")
 struct BERTEmbeddingProviderTests {
 
@@ -89,3 +90,4 @@ struct BERTEmbeddingProviderTests {
     #expect(sim12 > sim13)
   }
 }
+#endif // os(Linux)

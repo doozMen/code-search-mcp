@@ -26,9 +26,11 @@ struct EmbeddingProviderFallbackTests {
 
   @Test("BERT provider dimensions are 384", .disabled("Requires Python server"))
   func testBERTDimensions() async throws {
+    #if os(Linux)
     let provider = BERTEmbeddingProvider()
-    
+
     #expect(provider.dimensions == 384)
+    #endif
   }
 
   @Test("EmbeddingService uses CoreML by default")
@@ -45,17 +47,19 @@ struct EmbeddingProviderFallbackTests {
 
   @Test("EmbeddingService can use BERT provider", .disabled("Requires Python server"))
   func testEmbeddingServiceWithBERTProvider() async throws {
+    #if os(Linux)
     let tempDir = FileManager.default.temporaryDirectory
       .appendingPathComponent(UUID().uuidString).path
     defer { try? FileManager.default.removeItem(atPath: tempDir) }
-    
+
     let bertProvider = BERTEmbeddingProvider()
     try await bertProvider.initialize()
-    
+
     let service = try await EmbeddingService(indexPath: tempDir, provider: bertProvider)
-    
+
     // Should use BERT (384 dimensions)
     #expect(await service.embeddingDimension == 384)
+    #endif
   }
 
   @Test("Dimension mismatch between providers is detected")
