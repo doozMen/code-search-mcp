@@ -109,6 +109,35 @@ actor ProjectIndexer: Sendable {
         "count": "\(sourceFiles.count)"
       ])
 
+    // Warn if indexing a very large directory (likely a parent directory)
+    if sourceFiles.count > 10_000 {
+      logger.warning(
+        """
+        ⚠️  Large directory indexing detected! Found \(sourceFiles.count) files.
+
+        This may indicate you're indexing a parent directory instead of individual projects.
+
+        Recommendation:
+        1. Use setup-hooks per project: `code-search-mcp setup-hooks --install-hooks`
+        2. Or configure CODE_SEARCH_PROJECTS with individual project paths:
+           "CODE_SEARCH_PROJECTS": "/path/to/project1:/path/to/project2"
+
+        Indexing large parent directories causes:
+        - Poor search relevance (results from unrelated projects)
+        - Slow performance (searching 100k+ chunks)
+        - High memory usage
+
+        Project: \(projectName)
+        Path: \(path)
+        Files: \(sourceFiles.count)
+        """,
+        metadata: [
+          "project": "\(projectName)",
+          "file_count": "\(sourceFiles.count)",
+          "path": "\(path)",
+        ])
+    }
+
     // Extract code chunks from each file
     var totalChunks = 0
     var chunksWithEmbeddings: [CodeChunk] = []
