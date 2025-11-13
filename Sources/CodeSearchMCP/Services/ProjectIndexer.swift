@@ -1,5 +1,6 @@
 import Foundation
 import Logging
+import SwiftEmbeddings
 
 /// Service responsible for crawling project directories and extracting code chunks.
 ///

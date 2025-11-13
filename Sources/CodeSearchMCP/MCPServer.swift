@@ -1,6 +1,7 @@
 import Foundation
 import Logging
 import MCP
+import SwiftEmbeddings
 
 /// Main MCP server actor that manages the protocol implementation.
 ///

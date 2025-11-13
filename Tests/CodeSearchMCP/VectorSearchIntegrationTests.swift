@@ -2,6 +2,7 @@ import Foundation
 import Testing
 
 @testable import CodeSearchMCP
+@testable import SwiftEmbeddings
 
 /// Integration tests for pure vector-based search workflow.
 ///

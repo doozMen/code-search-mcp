@@ -59,9 +59,17 @@ let package = Package(
       name: "CodeSearchMCPTests",
       dependencies: [
         "CodeSearchMCP",
+        "SwiftEmbeddings",
         .product(name: "MCP", package: "swift-sdk"),
       ],
       path: "Tests/CodeSearchMCP"
+    ),
+    .testTarget(
+      name: "SwiftEmbeddingsTests",
+      dependencies: [
+        "SwiftEmbeddings",
+      ],
+      path: "Tests/SwiftEmbeddingsTests"
     ),
   ]
 )

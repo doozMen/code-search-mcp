@@ -1,7 +1,9 @@
+#if !os(macOS)
 import Foundation
 import Testing
 
 @testable import CodeSearchMCP
+@testable import SwiftEmbeddings
 
 /// Tests for BERT embedding provider.
 ///
@@ -89,3 +91,4 @@ struct BERTEmbeddingProviderTests {
     #expect(sim12 > sim13)
   }
 }
+#endif

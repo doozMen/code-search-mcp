@@ -1,3 +1,7 @@
+// BERT embedding provider is only available on Linux where CoreML is not available
+// On macOS, we exclusively use CoreML (NLEmbedding) for better performance
+#if !os(macOS)
+
 import Foundation
 import Logging
 
@@ -311,3 +315,4 @@ enum BERTProviderError: Error, LocalizedError {
     }
   }
 }
+#endif
