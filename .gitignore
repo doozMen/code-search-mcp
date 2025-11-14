@@ -47,3 +47,4 @@ dist/
 ._*
 .Spotlight-V100
 .Trashes
+/.claude/settings.local.json

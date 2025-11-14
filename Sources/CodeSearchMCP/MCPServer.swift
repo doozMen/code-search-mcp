@@ -10,6 +10,7 @@ import SwiftEmbeddings
 /// - Register and handle all MCP tool calls
 /// - Coordinate between search services
 /// - Maintain server state and configuration
+/// - Manage background indexing tasks via IndexingQueue
 actor MCPServer: Sendable {
   // MARK: - Properties
 
@@ -19,7 +20,9 @@ actor MCPServer: Sendable {
   private let embeddingService: EmbeddingService
   private let vectorSearchService: VectorSearchService
   private let codeMetadataExtractor: CodeMetadataExtractor
+  private let indexingQueue: IndexingQueue
   private let defaultProjectFilter: String?
+  private var isShuttingDown = false
 
   // MARK: - Initialization
 
@@ -37,7 +40,7 @@ actor MCPServer: Sendable {
     // Initialize server metadata
     self.server = Server(
       name: "code-search-mcp",
-      version: "0.4.3",
+      version: "0.5.1-alpha.1",
       capabilities: .init(
         prompts: nil,
         resources: nil,
@@ -49,9 +52,11 @@ actor MCPServer: Sendable {
     self.embeddingService = try await EmbeddingService(indexPath: indexPath)
     self.vectorSearchService = VectorSearchService(
       indexPath: indexPath, embeddingService: self.embeddingService)
+    // Note: In-memory index initialized lazily on first search (prevents startup hang with large indexes)
     self.codeMetadataExtractor = CodeMetadataExtractor(indexPath: indexPath)
     self.projectIndexer = ProjectIndexer(
       indexPath: indexPath, embeddingService: self.embeddingService)
+    self.indexingQueue = IndexingQueue(maxConcurrentJobs: 1)
 
     // Read default project filter from environment
     self.defaultProjectFilter = ProcessInfo.processInfo.environment["CODE_SEARCH_PROJECT_NAME"]
@@ -70,6 +75,41 @@ actor MCPServer: Sendable {
         "index_path": "\(indexPath)"
       ])
 
+    // Queue auto-migration for legacy indexes (runs in background with high priority)
+    let legacyProjects = await self.projectIndexer.detectLegacyIndexes()
+    if !legacyProjects.isEmpty {
+      self.logger.info(
+        "Detected legacy indexes, queuing for migration",
+        metadata: [
+          "legacy_count": "\(legacyProjects.count)",
+          "projects": "\(legacyProjects.map { $0.name }.joined(separator: ", "))",
+        ])
+
+      for project in legacyProjects {
+        let jobID = await indexingQueue.enqueue(
+          projectName: project.name,
+          priority: .high  // High priority for migrations
+        ) { [weak self] in
+          guard let self = self else { throw IndexingError.cancelled }
+
+          // Use ProjectIndexer's migrateProject() method
+          let result = try await self.projectIndexer.migrateProject(
+            name: project.name,
+            rootPath: project.rootPath
+          )
+
+          return result
+        }
+
+        self.logger.info(
+          "Legacy index migration queued",
+          metadata: [
+            "project": "\(project.name)",
+            "job_id": "\(jobID.uuidString)",
+          ])
+      }
+    }
+
     // Read projects to index from environment (colon-separated list)
     var allProjectPaths = projectPaths
     if let envProjects = ProcessInfo.processInfo.environment["CODE_SEARCH_PROJECTS"] {
@@ -79,33 +119,41 @@ actor MCPServer: Sendable {
         "Projects from environment",
         metadata: [
           "count": "\(envPaths.count)",
-          "projects": "\(envProjects)"
+          "projects": "\(envProjects)",
         ])
     }
 
-    // Index initial projects if provided
+    // Queue initial projects for background indexing
     if !allProjectPaths.isEmpty {
       self.logger.info(
-        "Indexing projects",
+        "Queuing projects for background indexing",
         metadata: [
           "count": "\(allProjectPaths.count)"
         ])
       for projectPath in allProjectPaths {
-        do {
+        let jobID = await indexingQueue.enqueue(
+          projectName: (projectPath as NSString).lastPathComponent,
+          priority: .low
+        ) { [weak self] in
+          guard let self = self else { throw IndexingError.cancelled }
           try await self.projectIndexer.indexProject(path: projectPath)
-          self.logger.info(
-            "Project indexed",
-            metadata: [
-              "path": "\(projectPath)"
-            ])
-        } catch {
-          self.logger.warning(
-            "Failed to index project",
-            metadata: [
-              "path": "\(projectPath)",
-              "error": "\(error)",
-            ])
+
+          // Get project info to return file/chunk counts
+          let projectName = (projectPath as NSString).lastPathComponent
+          if let projects = await self.projectIndexer.getIndexedProjects()
+            .first(where: { $0.name == projectName })
+          {
+            return (fileCount: projects.fileCount, chunkCount: projects.chunkCount)
+          }
+          return (fileCount: 0, chunkCount: 0)
         }
+
+        self.logger.info(
+          "Project queued for indexing",
+          metadata: [
+            "path": "\(projectPath)",
+            "job_id": "\(jobID.uuidString)",
+          ])
       }
     }
   }
@@ -135,6 +183,15 @@ actor MCPServer: Sendable {
     await server.waitUntilCompleted()
   }
 
+  /// Request graceful shutdown of the server.
+  ///
+  /// Sets the shutdown flag to signal any in-progress operations to stop cleanly.
+  /// Called when SIGINT or SIGTERM is received.
+  func requestShutdown() {
+    isShuttingDown = true
+    logger.info("Shutdown requested - no new operations will be accepted")
+  }
+
   // MARK: - Tool Handlers
 
   /// Handle ListTools request - return all available tools.
@@ -158,10 +215,10 @@ actor MCPServer: Sendable {
             ]),
             "projectFilter": .object([
               "type": "string",
-              "description": "Optional project name to limit search scope",
+              "description": "Project name to search in (REQUIRED). Use list_projects to see available projects or set CODE_SEARCH_PROJECT_NAME environment variable for default.",
             ]),
           ]),
-          "required": .array([.string("query")]),
+          "required": .array([.string("query"), .string("projectFilter")]),
         ])
       ),
 
@@ -266,6 +323,22 @@ actor MCPServer: Sendable {
           "properties": .object([:]),
         ])
       ),
+
+      // Indexing progress tool
+      Tool(
+        name: "indexing_progress",
+        description:
+          "Check the status of background indexing jobs. Returns queued, running, and completed job status.",
+        inputSchema: .object([
+          "type": "object",
+          "properties": .object([
+            "jobId": .object([
+              "type": "string",
+              "description": "Optional UUID of specific job to check (shows all jobs if omitted)",
+            ])
+          ]),
+        ])
+      ),
     ]
 
     return ListTools.Result(tools: tools)
@@ -305,6 +378,9 @@ actor MCPServer: Sendable {
     case "list_projects":
       return try await handleListProjects()
 
+    case "indexing_progress":
+      return try await handleIndexingProgress(params.arguments ?? [:])
+
     default:
       logger.warning(
         "Unknown tool requested",
@@ -330,19 +406,45 @@ actor MCPServer: Sendable {
     // Use environment default if no explicit filter provided
     let projectFilter = args["projectFilter"]?.stringValue ?? self.defaultProjectFilter
 
+    // Require projectFilter for focused, relevant results
+    guard let filter = projectFilter else {
+      let availableProjects = await projectIndexer.getIndexedProjects()
+        .prefix(10)
+        .map { $0.name }
+        .joined(separator: ", ")
+
+      throw MCPError.invalidParams("""
+        projectFilter is required for semantic search.
+
+        Searching across all projects would be too broad and return mixed results
+        from unrelated codebases. Specify which project to search.
+
+        Available projects (showing first 10):
+          \(availableProjects)
+
+        Example:
+          semantic_search(query: "\(query)", projectFilter: "rosselkit")
+
+        Set default filter with environment variable:
+          export CODE_SEARCH_PROJECT_NAME="your-project-name"
+
+        Use list_projects to see all indexed projects.
+        """)
+    }
+
     logger.debug(
       "Semantic search",
       metadata: [
         "query": "\(query)",
         "max_results": "\(maxResults)",
-        "project_filter": "\(projectFilter ?? "none")",
+        "project_filter": "\(filter)",
       ])
 
     // Delegate to vector search service
     let results = try await vectorSearchService.search(
       query: query,
       maxResults: maxResults,
-      projectFilter: projectFilter
+      projectFilter: filter
     )
 
     return formatSearchResults(results)
@@ -472,48 +574,62 @@ actor MCPServer: Sendable {
   }
 
   /// Handle reload_index tool call.
+  ///
+  /// Queues indexing as a background job and returns immediately with a job ID.
+  /// Use indexing_progress tool to check status.
   private func handleReloadIndex(_ args: [String: Value]) async throws -> CallTool.Result {
     let projectName = args["projectName"]?.stringValue
 
     if let project = projectName {
-      // Reload specific project
-      logger.info("Reloading project", metadata: ["project": "\(project)"])
+      // Queue specific project re-index with normal priority
+      logger.info("Queuing project re-index", metadata: ["project": "\(project)"])
 
-      do {
-        try await projectIndexer.reindexProject(projectName: project)
-        logger.info("Project reloaded successfully", metadata: ["project": "\(project)"])
-
-        return CallTool.Result(
-          content: [
-            .text("Successfully reloaded project: \(project)")
-          ]
-        )
-      } catch {
-        logger.error(
-          "Failed to reload project",
-          metadata: [
-            "project": "\(project)",
-            "error": "\(error)",
-          ])
-        throw MCPError.internalError("Failed to reload project \(project): \(error)")
+      let jobID = await indexingQueue.enqueue(
+        projectName: project,
+        priority: .normal
+      ) { [weak self] in
+        guard let self = self else { throw IndexingError.cancelled }
+        try await self.projectIndexer.reindexProject(projectName: project)
+        return (0, 0)  // File/chunk counts not available from reindexProject
       }
+
+      return CallTool.Result(
+        content: [
+          .text(
+            """
+            Project re-indexing queued in background.
+            Job ID: \(jobID.uuidString)
+
+            Check progress with: indexing_progress(jobId: "\(jobID.uuidString)")
+            """
+          )
+        ]
+      )
     } else {
-      // Reload all projects
-      logger.info("Reloading all projects")
+      // Queue all projects re-index with normal priority
+      logger.info("Queuing all projects re-index")
 
-      do {
-        try await projectIndexer.reindexAllProjects()
-        logger.info("All projects reloaded successfully")
-
-        return CallTool.Result(
-          content: [
-            .text("Successfully reloaded all projects")
-          ]
-        )
-      } catch {
-        logger.error("Failed to reload all projects", metadata: ["error": "\(error)"])
-        throw MCPError.internalError("Failed to reload all projects: \(error)")
+      let jobID = await indexingQueue.enqueue(
+        projectName: nil,
+        priority: .normal
+      ) { [weak self] in
+        guard let self = self else { throw IndexingError.cancelled }
+        try await self.projectIndexer.reindexAllProjects()
+        return (0, 0)  // File/chunk counts not available from reindexAllProjects
       }
+
+      return CallTool.Result(
+        content: [
+          .text(
+            """
+            All projects re-indexing queued in background.
+            Job ID: \(jobID.uuidString)
+
+            Check progress with: indexing_progress(jobId: "\(jobID.uuidString)")
+            """
+          )
+        ]
+      )
     }
   }
 
@@ -649,5 +765,93 @@ actor MCPServer: Sendable {
     formatter.dateStyle = .medium
     formatter.timeStyle = .short
     return formatter.string(from: date)
+  }
+
+  /// Handle indexing_progress tool call.
+  private func handleIndexingProgress(_ args: [String: Value]) async throws -> CallTool.Result {
+    logger.debug("Checking indexing progress")
+
+    if let jobIdStr = args["jobId"]?.stringValue,
+      let jobID = UUID(uuidString: jobIdStr)
+    {
+      // Get specific job status
+      if let jobInfo = await indexingQueue.getJobStatus(jobID) {
+        let output = formatJobInfo(jobInfo)
+        return CallTool.Result(
+          content: [
+            .text(output)
+          ]
+        )
+      } else {
+        return CallTool.Result(
+          content: [
+            .text("Job not found: \(jobIdStr)")
+          ]
+        )
+      }
+    } else {
+      // Get all jobs
+      let jobs = await indexingQueue.getAllJobs()
+      let stats = await indexingQueue.getStats()
+
+      var output = """
+        Indexing Queue Status
+        ====================
+
+        Summary:
+          - Queued: \(stats.pending)
+          - Active: \(stats.active)
+          - Completed: \(stats.completed)
+
+        """
+
+      if jobs.isEmpty {
+        output += "\nNo indexing jobs.\n"
+      } else {
+        output += "\nJobs:\n\n"
+        for job in jobs {
+          output += formatJobInfo(job) + "\n\n"
+        }
+      }
+
+      return CallTool.Result(
+        content: [
+          .text(output)
+        ]
+      )
+    }
+  }
+
+  /// Format a single job info for display.
+  private func formatJobInfo(_ job: IndexingQueue.JobInfo) -> String {
+    var output = """
+      Job: \(job.id.uuidString)
+      Status: \(job.status.rawValue)
+      Project: \(job.projectName ?? "all projects")
+      Priority: \(job.priority == .low ? "low" : job.priority == .normal ? "normal" : "high")
+      Created: \(formatDate(job.createdAt))
+      """
+
+    if let startedAt = job.startedAt {
+      output += "\n      Started: \(formatDate(startedAt))"
+    }
+
+    if let completedAt = job.completedAt {
+      output += "\n      Completed: \(formatDate(completedAt))"
+    }
+
+    if let fileCount = job.fileCount {
+      output += "\n      Files: \(fileCount)"
+    }
+
+    if let chunkCount = job.chunkCount {
+      output += "\n      Chunks: \(chunkCount)"
+    }
+
+    if let error = job.error {
+      output += "\n      Error: \(error)"
+    }
+
+    return output
   }
 }

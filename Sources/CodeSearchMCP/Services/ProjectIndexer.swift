@@ -79,12 +79,67 @@ actor ProjectIndexer: Sendable {
 
   /// Index an entire project directory.
   ///
-  /// Recursively scans the directory for supported source files,
-  /// extracts code chunks, and generates embeddings.
+  /// Automatically detects if the directory contains multiple sub-projects with
+  /// project markers (.git, Package.swift, package.json, etc.) and indexes each
+  /// separately. If no sub-projects are found, indexes as a single project.
   ///
   /// - Parameter path: Path to the project root directory
   /// - Throws: If directory access or indexing fails
   func indexProject(path: String) async throws {
+    // Validate path
+    var isDirectory: ObjCBool = false
+    guard fileManager.fileExists(atPath: path, isDirectory: &isDirectory), isDirectory.boolValue
+    else {
+      throw IndexingError.invalidProjectPath(path)
+    }
+
+    // Detect subprojects in the directory
+    let subprojects = try await detectSubprojects(in: path)
+
+    if subprojects.isEmpty {
+      // No subprojects found - index as a single project
+      try await indexSingleProject(path: path)
+    } else {
+      // Multiple subprojects found - index each separately
+      logger.info(
+        "Detected multiple subprojects",
+        metadata: [
+          "parent_directory": "\((path as NSString).lastPathComponent)",
+          "subproject_count": "\(subprojects.count)",
+          "subprojects": "\(subprojects.map { $0.name }.joined(separator: ", "))",
+        ])
+
+      for subproject in subprojects {
+        do {
+          try await indexSingleProject(path: subproject.path)
+        } catch {
+          logger.error(
+            "Failed to index subproject",
+            metadata: [
+              "subproject": "\(subproject.name)",
+              "path": "\(subproject.path)",
+              "error": "\(error)",
+            ])
+          // Continue with other subprojects
+        }
+      }
+
+      logger.info(
+        "Completed indexing all subprojects",
+        metadata: [
+          "parent_directory": "\((path as NSString).lastPathComponent)",
+          "successful_count": "\(subprojects.count)",
+        ])
+    }
+  }
+
+  /// Index a single project directory without subproject detection.
+  ///
+  /// This is the core indexing logic that processes all files in a single project.
+  ///
+  /// - Parameter path: Path to the project root directory
+  /// - Throws: If directory access or indexing fails
+  private func indexSingleProject(path: String) async throws {
     let projectName = (path as NSString).lastPathComponent
 
     logger.info(
@@ -94,19 +149,13 @@ actor ProjectIndexer: Sendable {
         "path": "\(path)",
       ])
 
-    // Validate path
-    var isDirectory: ObjCBool = false
-    guard fileManager.fileExists(atPath: path, isDirectory: &isDirectory), isDirectory.boolValue
-    else {
-      throw IndexingError.invalidProjectPath(path)
-    }
-
     // Recursively find all source files
     let sourceFiles = try findSourceFiles(in: path)
     logger.info(
       "Found source files",
       metadata: [
-        "count": "\(sourceFiles.count)"
+        "project": "\(projectName)",
+        "count": "\(sourceFiles.count)",
       ])
 
     // Extract code chunks from each file
@@ -276,7 +325,267 @@ actor ProjectIndexer: Sendable {
     projectRegistry.allProjects()
   }
 
+  // MARK: - Auto-Migration
+
+  /// Detect legacy indexes that may need migration.
+  ///
+  /// Identifies projects with unusually large file counts (>5,000) which may indicate
+  /// indexing of parent directories instead of individual projects.
+  ///
+  /// - Returns: Array of project metadata for potential legacy indexes
+  func detectLegacyIndexes() -> [ProjectMetadata] {
+    let legacyThreshold = 5_000
+    return projectRegistry.allProjects().filter { $0.fileCount > legacyThreshold }
+  }
+
+  /// Migrate a single project by clearing its old chunks and re-indexing.
+  ///
+  /// This is useful for background migration jobs. Clears old chunks, unregisters
+  /// the project from the registry, and re-indexes with current detection logic.
+  ///
+  /// - Parameters:
+  ///   - projectName: Name of the project to migrate
+  ///   - rootPath: Root path of the project
+  /// - Returns: Tuple of (fileCount, chunkCount) after re-indexing
+  /// - Throws: IndexingError if migration fails
+  func migrateProject(name projectName: String, rootPath: String) async throws -> (
+    fileCount: Int, chunkCount: Int
+  ) {
+    logger.info(
+      "Migrating project",
+      metadata: [
+        "project": "\(projectName)",
+        "path": "\(rootPath)",
+      ])
+
+    // Clear old chunks
+    let chunksDir = (indexPath as NSString).appendingPathComponent("chunks/\(projectName)")
+    if fileManager.fileExists(atPath: chunksDir) {
+      try fileManager.removeItem(atPath: chunksDir)
+      logger.debug("Cleared old chunks", metadata: ["project": "\(projectName)"])
+    }
+
+    // Unregister old project
+    projectRegistry.unregister(projectName)
+    try saveProjectRegistry()
+
+    // Re-index with new detection logic
+    try await indexProject(path: rootPath)
+
+    // Get new project stats
+    if let newProject = projectRegistry.allProjects().first(where: { $0.name == projectName }) {
+      logger.info(
+        "Project migration complete",
+        metadata: [
+          "project": "\(projectName)",
+          "files": "\(newProject.fileCount)",
+          "chunks": "\(newProject.chunkCount)",
+        ])
+      return (fileCount: newProject.fileCount, chunkCount: newProject.chunkCount)
+    }
+
+    return (fileCount: 0, chunkCount: 0)
+  }
+
+  /// Automatically migrate legacy indexes by re-indexing with subproject detection.
+  ///
+  /// This is called silently at startup to fix indexes created before subproject detection
+  /// was implemented. Projects are only migrated if their rootPath still exists.
+  ///
+  /// - Throws: IndexingError if migration fails
+  func autoMigrateLegacyIndexes() async throws {
+    let legacyProjects = detectLegacyIndexes()
+
+    guard !legacyProjects.isEmpty else {
+      logger.debug("No legacy indexes detected")
+      return
+    }
+
+    logger.info(
+      "Detected legacy indexes, starting automatic migration",
+      metadata: [
+        "legacy_count": "\(legacyProjects.count)",
+        "projects": "\(legacyProjects.map { $0.name }.joined(separator: ", "))",
+      ])
+
+    for project in legacyProjects {
+      // Verify root path still exists
+      guard fileManager.fileExists(atPath: project.rootPath) else {
+        logger.warning(
+          "Skipping migration for project with inaccessible path",
+          metadata: [
+            "project": "\(project.name)",
+            "path": "\(project.rootPath)",
+          ])
+        continue
+      }
+
+      logger.info(
+        "Migrating legacy index",
+        metadata: [
+          "project": "\(project.name)",
+          "old_file_count": "\(project.fileCount)",
+          "path": "\(project.rootPath)",
+        ])
+
+      do {
+        // Clear old chunks
+        let chunksDir = (indexPath as NSString).appendingPathComponent("chunks/\(project.name)")
+        if fileManager.fileExists(atPath: chunksDir) {
+          try fileManager.removeItem(atPath: chunksDir)
+          logger.debug("Cleared old chunks", metadata: ["project": "\(project.name)"])
+        }
+
+        // Unregister old project
+        projectRegistry.unregister(project.name)
+        try saveProjectRegistry()
+
+        // Re-index with new detection logic
+        try await indexProject(path: project.rootPath)
+
+        logger.info(
+          "Successfully migrated legacy index",
+          metadata: [
+            "project": "\(project.name)",
+            "path": "\(project.rootPath)",
+          ])
+      } catch {
+        logger.error(
+          "Failed to migrate legacy index",
+          metadata: [
+            "project": "\(project.name)",
+            "path": "\(project.rootPath)",
+            "error": "\(error)",
+          ])
+        // Continue with other projects
+      }
+    }
+
+    logger.info(
+      "Legacy index migration complete",
+      metadata: ["migrated_count": "\(legacyProjects.count)"])
+  }
+
   // MARK: - Private Methods
+
+  /// Detect subprojects within a directory.
+  ///
+  /// Scans immediate subdirectories for project markers (.git, Package.swift, etc.)
+  /// and returns a list of detected subprojects. Special handling for Swift packages:
+  /// if Package.swift is found, parses products and returns them as subprojects.
+  ///
+  /// - Parameter directory: Parent directory to scan
+  /// - Returns: Array of detected subprojects (empty if none found or if directory itself is a simple project)
+  /// - Throws: If directory enumeration or Swift package parsing fails
+  private func detectSubprojects(in directory: String) async throws -> [Subproject] {
+    let projectMarkers: Set<String> = [
+      ".git",
+      "Package.swift",
+      "package.json",
+      "pom.xml",
+      "build.gradle",
+      "Cargo.toml",
+      "pyproject.toml",
+      "setup.py",
+      "go.mod",
+      "Gemfile",
+      "composer.json",
+    ]
+
+    // Special handling for Swift packages - parse products as subprojects
+    let packageSwiftPath = (directory as NSString).appendingPathComponent("Package.swift")
+    if fileManager.fileExists(atPath: packageSwiftPath) {
+      logger.debug(
+        "Directory contains Package.swift, parsing Swift package products",
+        metadata: ["path": "\(directory)"])
+
+      do {
+        let parser = SwiftPackageParser()
+        let products = try await parser.parsePackage(at: directory)
+
+        // If package has multiple products, treat each as a subproject
+        if products.count > 1 {
+          logger.info(
+            "Detected Swift package with multiple products",
+            metadata: [
+              "path": "\(directory)",
+              "product_count": "\(products.count)",
+              "products": "\(products.map { $0.name }.joined(separator: ", "))",
+            ])
+          return products
+        } else {
+          // Single product package - index as single project
+          logger.debug(
+            "Swift package has single product, indexing as single project",
+            metadata: ["path": "\(directory)"])
+          return []
+        }
+      } catch {
+        logger.warning(
+          "Failed to parse Swift package, treating as single project",
+          metadata: [
+            "path": "\(directory)",
+            "error": "\(error)",
+          ])
+        return []
+      }
+    }
+
+    // Check if directory itself is a project (non-Swift)
+    for marker in projectMarkers where marker != "Package.swift" {
+      let markerPath = (directory as NSString).appendingPathComponent(marker)
+      if fileManager.fileExists(atPath: markerPath) {
+        // This directory is itself a project, don't look for subprojects
+        logger.debug(
+          "Directory is a project itself (found \(marker))",
+          metadata: ["path": "\(directory)"])
+        return []
+      }
+    }
+
+    // Scan immediate subdirectories for project markers
+    var subprojects: [Subproject] = []
+
+    guard
+      let contents = try? fileManager.contentsOfDirectory(atPath: directory)
+    else {
+      return []
+    }
+
+    for item in contents {
+      // Skip hidden directories and common non-project directories
+      if item.hasPrefix(".") || isExcludedPath(item) {
+        continue
+      }
+
+      let itemPath = (directory as NSString).appendingPathComponent(item)
+      var isDirectory: ObjCBool = false
+
+      guard fileManager.fileExists(atPath: itemPath, isDirectory: &isDirectory),
+        isDirectory.boolValue
+      else {
+        continue
+      }
+
+      // Check if this subdirectory contains any project markers
+      for marker in projectMarkers {
+        let markerPath = (itemPath as NSString).appendingPathComponent(marker)
+        if fileManager.fileExists(atPath: markerPath) {
+          subprojects.append(Subproject(name: item, path: itemPath))
+          logger.debug(
+            "Detected subproject",
+            metadata: [
+              "name": "\(item)",
+              "path": "\(itemPath)",
+              "marker": "\(marker)",
+            ])
+          break  // Found a marker, no need to check others for this directory
+        }
+      }
+    }
+
+    return subprojects
+  }
 
   /// Recursively find all supported source files in a directory.
   ///
@@ -673,6 +982,39 @@ actor ProjectIndexer: Sendable {
   }
 }
 
+// MARK: - Supporting Types
+
+/// Type of monorepo or project structure detected.
+enum MonorepoType: String, Sendable, Codable {
+  case swiftPackageManager
+  case npmWorkspaces
+  case goWorkspace
+  case gradleMultiModule
+  case pythonPoetry
+}
+
+/// Represents a detected subproject within a parent directory.
+struct Subproject: Sendable {
+  /// Name of the subproject (directory name or product name)
+  let name: String
+
+  /// Full path to the subproject directory
+  let path: String
+
+  /// Type of monorepo or project structure (optional)
+  let type: MonorepoType?
+
+  /// Whether this is a root-level project in a monorepo
+  let isRoot: Bool
+
+  init(name: String, path: String, type: MonorepoType? = nil, isRoot: Bool = false) {
+    self.name = name
+    self.path = path
+    self.type = type
+    self.isRoot = isRoot
+  }
+}
+
 // MARK: - Error Types
 
 enum IndexingError: Error, LocalizedError {
@@ -680,6 +1022,7 @@ enum IndexingError: Error, LocalizedError {
   case directoryEnumerationFailed(String)
   case fileReadingFailed(String, Error)
   case projectNotFound(String)
+  case cancelled
 
   var errorDescription: String? {
     switch self {
@@ -691,6 +1034,8 @@ enum IndexingError: Error, LocalizedError {
       return "Failed to read file \(file): \(error)"
     case .projectNotFound(let name):
       return "Project not found in registry: \(name)"
+    case .cancelled:
+      return "Indexing operation was cancelled"
     }
   }
 }

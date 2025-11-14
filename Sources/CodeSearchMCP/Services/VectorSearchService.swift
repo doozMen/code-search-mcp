@@ -1,6 +1,6 @@
+import Accelerate
 import Foundation
 import Logging
-import Accelerate
 import SwiftEmbeddings
 
 // Disambiguate Logger
@@ -45,7 +45,7 @@ actor VectorSearchService: Sendable {
       "In-memory index ready",
       metadata: [
         "memory_mb": "\(stats.usedMB)",
-        "chunks_loaded": "\(stats.totalChunks)"
+        "chunks_loaded": "\(stats.totalChunks)",
       ]
     )
   }
@@ -58,6 +58,8 @@ actor VectorSearchService: Sendable {
   /// with highest cosine similarity scores. Uses SIMD-optimized in-memory
   /// index when available for blazing fast performance.
   ///
+  /// Lazy initialization: Loads in-memory index on first search if not already loaded.
+  ///
   /// - Parameters:
   ///   - query: Natural language query or code snippet
   ///   - maxResults: Maximum number of results to return
@@ -69,13 +71,19 @@ actor VectorSearchService: Sendable {
     maxResults: Int = 10,
     projectFilter: String? = nil
   ) async throws -> [SearchResult] {
+    // Lazy initialization: Load in-memory index on first search
+    if !useInMemoryIndex {
+      logger.info("First search detected, initializing in-memory index...")
+      try await initializeInMemoryIndex()
+    }
+
     logger.debug(
       "Semantic search",
       metadata: [
         "query_length": "\(query.count)",
         "max_results": "\(maxResults)",
         "project_filter": "\(projectFilter ?? "none")",
-        "use_in_memory": "\(useInMemoryIndex)"
+        "use_in_memory": "\(useInMemoryIndex)",
       ])
 
     // Generate embedding for the query
@@ -159,7 +167,7 @@ actor VectorSearchService: Sendable {
       metadata: [
         "results_returned": "\(searchResults.count)",
         "top_score": searchResults.first.map { "\($0.relevanceScore)" } ?? "N/A",
-        "deduplicated_from": "\(scoredResults.count)"
+        "deduplicated_from": "\(scoredResults.count)",
       ])
 
     return searchResults
@@ -194,7 +202,7 @@ actor VectorSearchService: Sendable {
             "file": "\(scored.chunk.filePath)",
             "line": "\(scored.chunk.startLine)",
             "score": "\(scored.score)",
-            "chunk_id": "\(scored.chunk.id)"
+            "chunk_id": "\(scored.chunk.id)",
           ]
         )
       }
@@ -205,7 +213,7 @@ actor VectorSearchService: Sendable {
       metadata: [
         "input_count": "\(results.count)",
         "output_count": "\(deduplicated.count)",
-        "duplicates_removed": "\(results.count - deduplicated.count)"
+        "duplicates_removed": "\(results.count - deduplicated.count)",
       ]
     )
 
@@ -289,7 +297,7 @@ actor VectorSearchService: Sendable {
                 metadata: [
                   "chunk_id": "\(chunk.id)",
                   "expected": "\(queryEmbedding.count)",
-                  "actual": "\(embedding.count)"
+                  "actual": "\(embedding.count)",
                 ]
               )
               continue
@@ -312,14 +320,14 @@ actor VectorSearchService: Sendable {
       return allResults
     }
 
-    let duration = Date().timeIntervalSince(startTime) * 1000 // Convert to ms
+    let duration = Date().timeIntervalSince(startTime) * 1000  // Convert to ms
 
     logger.info(
       "Parallel SIMD similarity computation completed",
       metadata: [
         "chunks_processed": "\(chunks.count)",
         "time_ms": "\(duration)",
-        "throughput_chunks_per_ms": "\(Double(chunks.count) / duration)"
+        "throughput_chunks_per_ms": "\(Double(chunks.count) / duration)",
       ]
     )
 

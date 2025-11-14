@@ -2,6 +2,7 @@ import ArgumentParser
 import Foundation
 import Logging
 import MCP
+import UnixSignals
 
 /// Main entry point for the code-search-mcp server.
 ///
@@ -23,8 +24,8 @@ struct CodeSearchMCP: AsyncParsableCommand {
       Provides MCP tools for pure vector-based semantic search, file context extraction,
       and dependency graph analysis across indexed codebases.
       """,
-    version: "0.4.3",
-    subcommands: [SetupHooksCommand.self]
+    version: "0.5.1-alpha.1",
+    subcommands: [IndexCommand.self, SetupHooksCommand.self]
   )
 
   // MARK: - Configuration Options
@@ -45,13 +46,6 @@ struct CodeSearchMCP: AsyncParsableCommand {
   var indexPath: String =
     "\(FileManager.default.homeDirectoryForCurrentUser.path)/.cache/code-search-mcp"
 
-  /// Optional project directories to index (can be specified multiple times).
-  @Option(
-    name: .long,
-    help: "Project directory to index (can be specified multiple times)"
-  )
-  var projectPaths: [String] = []
-
   // MARK: - Async Command Execution
 
   func run() async throws {
@@ -71,9 +65,36 @@ struct CodeSearchMCP: AsyncParsableCommand {
     do {
       let server = try await MCPServer(
         indexPath: indexPath,
-        projectPaths: projectPaths
+        projectPaths: []
       )
-      try await server.run()
+
+      // Run server and signal handler concurrently
+      await withTaskGroup(of: Void.self) { group in
+        // Task 1: Run the MCP server
+        group.addTask {
+          do {
+            try await server.run()
+          } catch {
+            logger.error("Server error: \(error)")
+          }
+        }
+
+        // Task 2: Listen for shutdown signals (SIGINT, SIGTERM)
+        group.addTask {
+          for await signal in await UnixSignalsSequence(trapping: .sigint, .sigterm) {
+            logger.info("Received \(signal), initiating graceful shutdown...")
+
+            // Request server to stop accepting new work
+            await server.requestShutdown()
+
+            // Allow brief cleanup period (flush buffers, close connections)
+            try? await Task.sleep(for: .seconds(1))
+
+            logger.info("Shutdown complete")
+            Foundation.exit(EXIT_SUCCESS)
+          }
+        }
+      }
     } catch {
       logger.error(
         "Failed to start server",

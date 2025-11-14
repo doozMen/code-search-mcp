@@ -92,4 +92,5 @@ struct BERTEmbeddingProviderTests {
     #expect(sim12 > sim13)
   }
 }
-#endif
+#endif  // os(Linux)
+#endif  // !os(macOS)

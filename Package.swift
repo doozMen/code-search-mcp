@@ -35,6 +35,11 @@ let package = Package(
       url: "https://github.com/apple/swift-nio.git",
       from: "2.60.0"
     ),
+    // Graceful Shutdown & Signal Handling
+    .package(
+      url: "https://github.com/swift-server/swift-service-lifecycle.git",
+      from: "2.6.1"
+    ),
   ],
   targets: [
     .target(
@@ -52,6 +57,7 @@ let package = Package(
         .product(name: "Logging", package: "swift-log"),
         .product(name: "ArgumentParser", package: "swift-argument-parser"),
         .product(name: "NIO", package: "swift-nio"),
+        .product(name: "UnixSignals", package: "swift-service-lifecycle"),
       ],
       path: "Sources/CodeSearchMCP"
     ),

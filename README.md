@@ -123,6 +123,7 @@ code-search-mcp setup-hooks --project-path ~/my-other-project
 
 **Environment Variables**:
 - `CODE_SEARCH_PROJECT_NAME`: Auto-filter searches to this project
+- `CODE_SEARCH_PROJECTS`: Colon-separated list of project paths to index (see Multi-Project Configuration below)
 - Explicit `projectFilter` parameter overrides environment
 
 **Benefits**:
@@ -130,6 +131,65 @@ code-search-mcp setup-hooks --project-path ~/my-other-project
 - No manual re-indexing needed
 - Works seamlessly with multi-project workflows
 - Background re-indexing won't block your work
+
+### Multi-Project Configuration
+
+For indexing multiple projects simultaneously, configure `CODE_SEARCH_PROJECTS` in your MCP server config:
+
+```json
+{
+  "mcpServers": {
+    "code-search-mcp": {
+      "command": "code-search-mcp",
+      "args": ["--log-level", "info"],
+      "env": {
+        "CODE_SEARCH_PROJECTS": "/Users/you/MyApp:/Users/you/MyLibrary:/Users/you/MyService"
+      }
+    }
+  }
+}
+```
+
+**Important**: Use colon (`:`) to separate paths, not commas or semicolons.
+
+**Recommended**: Index each project separately rather than a parent directory containing multiple projects.
+
+❌ **Bad**: `/Users/you/Developer` (indexes everything, 87k+ files)
+✅ **Good**: `/Users/you/Developer/MyApp:/Users/you/Developer/MyLib`
+
+### Common Pitfalls
+
+#### 1. Indexing Parent Directories
+
+**Problem**: Indexing `/Users/you/Developer` creates a massive single project with irrelevant search results.
+
+**Solution**:
+- Use `setup-hooks` in each project directory
+- Or configure `CODE_SEARCH_PROJECTS` with individual project paths
+
+#### 2. Poor Search Relevance
+
+**Problem**: Search returns results from unrelated projects in your Developer folder.
+
+**Diagnosis**: Run `/index_status` and check if you have one large project (>10k files).
+
+**Solution**:
+```bash
+# Clear the oversized index
+rm -rf ~/.cache/code-search-mcp
+
+# Re-index individual projects
+cd ~/Developer/MyApp
+code-search-mcp setup-hooks --install-hooks
+```
+
+#### 3. Slow Performance
+
+**Problem**: Searches take >1 second, high memory usage.
+
+**Cause**: Searching 100k+ chunks from parent directory indexing.
+
+**Solution**: Limit indexing to projects you actually work with.
 
 ---
 
@@ -142,7 +202,7 @@ Search for code with similar meaning to your query.
 **Parameters**:
 - `query` (required): Natural language query or code snippet
 - `maxResults` (optional): Maximum results to return (default: 10)
-- `projectFilter` (optional): Limit search to specific project
+- `projectFilter` (REQUIRED): Specify which project to search in. Use `list_projects` to see available projects or set `CODE_SEARCH_PROJECT_NAME` environment variable for default.
 
 **Example**:
 ```json
@@ -150,6 +210,7 @@ Search for code with similar meaning to your query.
   "name": "semantic_search",
   "arguments": {
     "query": "function that validates email addresses",
+    "projectFilter": "my-project",
     "maxResults": 5
   }
 }
