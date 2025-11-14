@@ -329,7 +329,7 @@ vDSP_svesq(a, 1, &magnitudeSquared, count)     // Magnitude
 
 **Duplicate results**: Fixed in v0.3.2 with deduplication logic
 
-**Project not indexed**: Use `CODE_SEARCH_PROJECTS` env var or `--project-paths` CLI arg
+**Project not indexed**: Use `code-search-mcp index <path>` or set `CODE_SEARCH_PROJECTS` env var
 
 **Stale results**: Run `reload_index` tool or setup auto-indexing with `setup-hooks`. In v0.5.0+, returns immediately - check progress with `indexing_progress` tool
 

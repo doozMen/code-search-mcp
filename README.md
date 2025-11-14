@@ -202,7 +202,7 @@ Search for code with similar meaning to your query.
 **Parameters**:
 - `query` (required): Natural language query or code snippet
 - `maxResults` (optional): Maximum results to return (default: 10)
-- `projectFilter` (optional): Limit search to specific project
+- `projectFilter` (REQUIRED): Specify which project to search in. Use `list_projects` to see available projects or set `CODE_SEARCH_PROJECT_NAME` environment variable for default.
 
 **Example**:
 ```json
@@ -210,6 +210,7 @@ Search for code with similar meaning to your query.
   "name": "semantic_search",
   "arguments": {
     "query": "function that validates email addresses",
+    "projectFilter": "my-project",
     "maxResults": 5
   }
 }
