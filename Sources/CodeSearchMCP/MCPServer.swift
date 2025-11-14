@@ -231,7 +231,11 @@ actor MCPServer: Sendable {
           "properties": .object([
             "filePath": .object([
               "type": "string",
-              "description": "Path to the file (relative to project root)",
+              "description": "Path to the file (relative to project root or absolute path)",
+            ]),
+            "projectName": .object([
+              "type": "string",
+              "description": "Project name (optional, recommended when using relative paths from search results)",
             ]),
             "startLine": .object([
               "type": "integer",
@@ -459,6 +463,7 @@ actor MCPServer: Sendable {
       throw MCPError.invalidParams("Parameter 'filePath' must be a string")
     }
 
+    let projectName = args["projectName"]?.stringValue
     let startLine = args["startLine"]?.intValue
     let endLine = args["endLine"]?.intValue
     let contextLines = args["contextLines"]?.intValue ?? 3
@@ -467,6 +472,7 @@ actor MCPServer: Sendable {
       "File context requested",
       metadata: [
         "file_path": "\(filePath)",
+        "project_name": "\(projectName ?? "auto-detect")",
         "start_line": "\(startLine ?? 0)",
         "end_line": "\(endLine ?? 0)",
         "context_lines": "\(contextLines)",
@@ -475,6 +481,7 @@ actor MCPServer: Sendable {
     // Delegate to project indexer for file context extraction
     let result = try await projectIndexer.extractFileContext(
       filePath: filePath,
+      projectName: projectName,
       startLine: startLine,
       endLine: endLine,
       contextLines: contextLines

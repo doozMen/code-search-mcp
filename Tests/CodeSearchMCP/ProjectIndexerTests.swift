@@ -431,6 +431,79 @@ struct ProjectIndexerTests {
     #expect(jsResult.language == "JavaScript")
   }
 
+  @Test("Extract file context with relative path and project name")
+  func testExtractFileContextRelativePath() async throws {
+    let tempDir = try Self.createTempDir()
+    defer { Self.cleanupTempDir(tempDir) }
+
+    // Create a project directory
+    let projectDir = (tempDir as NSString).appendingPathComponent("MyProject")
+    try FileManager.default.createDirectory(
+      atPath: projectDir, withIntermediateDirectories: true)
+
+    // Create a test file in a subdirectory
+    let srcDir = (projectDir as NSString).appendingPathComponent("src")
+    try FileManager.default.createDirectory(atPath: srcDir, withIntermediateDirectories: true)
+    let testFile = (srcDir as NSString).appendingPathComponent("example.swift")
+    try "func test() { print(\"hello\") }".write(toFile: testFile, atomically: true, encoding: .utf8)
+
+    let embeddingService = try await Self.createEmbeddingService(indexPath: tempDir)
+    let indexer = ProjectIndexer(indexPath: tempDir, embeddingService: embeddingService)
+
+    // Index the project
+    try await indexer.indexProject(path: projectDir)
+
+    // Test with relative path and project name (Issue #45 fix)
+    let result = try await indexer.extractFileContext(
+      filePath: "src/example.swift",
+      projectName: "MyProject"
+    )
+
+    #expect(result.projectName == "MyProject")
+    #expect(result.context.contains("test"))
+    #expect(result.language == "Swift")
+  }
+
+  @Test("Extract file context with relative path auto-detects project")
+  func testExtractFileContextRelativePathAutoDetect() async throws {
+    let tempDir = try Self.createTempDir()
+    defer { Self.cleanupTempDir(tempDir) }
+
+    // Create a single project
+    let projectDir = (tempDir as NSString).appendingPathComponent("SingleProject")
+    try FileManager.default.createDirectory(
+      atPath: projectDir, withIntermediateDirectories: true)
+
+    let testFile = (projectDir as NSString).appendingPathComponent("file.swift")
+    try "let x = 42".write(toFile: testFile, atomically: true, encoding: .utf8)
+
+    let embeddingService = try await Self.createEmbeddingService(indexPath: tempDir)
+    let indexer = ProjectIndexer(indexPath: tempDir, embeddingService: embeddingService)
+
+    // Index the project
+    try await indexer.indexProject(path: projectDir)
+
+    // Test auto-detection without projectName
+    let result = try await indexer.extractFileContext(filePath: "file.swift")
+
+    #expect(result.projectName == "SingleProject")
+    #expect(result.context.contains("let x = 42"))
+  }
+
+  @Test("Extract file context with relative path fails when file not found")
+  func testExtractFileContextRelativePathNotFound() async throws {
+    let tempDir = try Self.createTempDir()
+    defer { Self.cleanupTempDir(tempDir) }
+
+    let embeddingService = try await Self.createEmbeddingService(indexPath: tempDir)
+    let indexer = ProjectIndexer(indexPath: tempDir, embeddingService: embeddingService)
+
+    // Try to use relative path without any indexed projects
+    await #expect(throws: IndexingError.self) {
+      try await indexer.extractFileContext(filePath: "nonexistent.swift")
+    }
+  }
+
   // MARK: - Symbol Extraction Tests (Removed - Keyword Search Deprecated)
 
   // Symbol extraction was part of keyword search functionality, which has been

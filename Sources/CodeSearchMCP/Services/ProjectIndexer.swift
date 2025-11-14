@@ -782,6 +782,7 @@ actor ProjectIndexer: Sendable {
   /// - Throws: IndexingError if file doesn't exist or read fails
   func extractFileContext(
     filePath: String,
+    projectName: String? = nil,
     startLine: Int? = nil,
     endLine: Int? = nil,
     contextLines: Int = 3
@@ -790,24 +791,88 @@ actor ProjectIndexer: Sendable {
       "Extracting file context",
       metadata: [
         "file": "\(filePath)",
+        "project": "\(projectName ?? "auto-detect")",
         "start": "\(startLine ?? 0)",
         "end": "\(endLine ?? 0)",
         "context": "\(contextLines)",
       ])
 
+    // Resolve file path (supports both absolute and relative paths)
+    let resolvedPath: String
+    let detectedProjectName: String
+
+    if filePath.hasPrefix("/") {
+      // Absolute path - use as-is
+      resolvedPath = filePath
+      detectedProjectName = extractProjectName(from: filePath)
+
+      logger.debug("Using absolute path", metadata: ["path": "\(resolvedPath)"])
+    } else {
+      // Relative path - resolve against project root
+      if let project = projectName {
+        // Project specified - resolve against its root
+        guard let projectMeta = projectRegistry.project(named: project) else {
+          throw IndexingError.invalidProjectPath(
+            "Project '\(project)' not found. Use list_projects to see available projects.")
+        }
+
+        resolvedPath = (projectMeta.rootPath as NSString).appendingPathComponent(filePath)
+        detectedProjectName = project
+
+        logger.debug(
+          "Resolved relative path",
+          metadata: [
+            "relative": "\(filePath)",
+            "project": "\(project)",
+            "absolute": "\(resolvedPath)",
+          ])
+      } else {
+        // No project specified - search all projects for a match
+        let allProjects = projectRegistry.allProjects()
+        var matches: [(project: String, path: String)] = []
+
+        for projectMeta in allProjects {
+          let candidatePath = (projectMeta.rootPath as NSString).appendingPathComponent(filePath)
+          if fileManager.fileExists(atPath: candidatePath) {
+            matches.append((projectMeta.name, candidatePath))
+          }
+        }
+
+        if matches.isEmpty {
+          throw IndexingError.invalidProjectPath(
+            "File '\(filePath)' not found in any indexed project. Provide projectName parameter or use an absolute path.")
+        } else if matches.count > 1 {
+          let projectList = matches.map { $0.project }.joined(separator: ", ")
+          throw IndexingError.invalidProjectPath(
+            "File '\(filePath)' found in multiple projects: \(projectList). Specify projectName parameter to disambiguate.")
+        } else {
+          resolvedPath = matches[0].path
+          detectedProjectName = matches[0].project
+
+          logger.debug(
+            "Auto-detected project",
+            metadata: [
+              "relative": "\(filePath)",
+              "project": "\(detectedProjectName)",
+              "absolute": "\(resolvedPath)",
+            ])
+        }
+      }
+    }
+
     // Validate file exists
-    guard fileManager.fileExists(atPath: filePath) else {
-      logger.warning("File not found", metadata: ["path": "\(filePath)"])
-      throw IndexingError.invalidProjectPath(filePath)
+    guard fileManager.fileExists(atPath: resolvedPath) else {
+      logger.warning("File not found", metadata: ["path": "\(resolvedPath)"])
+      throw IndexingError.invalidProjectPath(resolvedPath)
     }
 
     // Read file content
     let content: String
     do {
-      content = try String(contentsOfFile: filePath, encoding: .utf8)
+      content = try String(contentsOfFile: resolvedPath, encoding: .utf8)
     } catch {
-      logger.error("Failed to read file", metadata: ["path": "\(filePath)", "error": "\(error)"])
-      throw IndexingError.fileReadingFailed(filePath, error)
+      logger.error("Failed to read file", metadata: ["path": "\(resolvedPath)", "error": "\(error)"])
+      throw IndexingError.fileReadingFailed(resolvedPath, error)
     }
 
     let lines = content.split(separator: "\n", omittingEmptySubsequences: false)
@@ -844,9 +909,8 @@ actor ProjectIndexer: Sendable {
 
     let extractedContent = extractedLines.joined(separator: "\n")
 
-    // Detect language and extract project name
-    let language = detectLanguage(from: filePath)
-    let projectName = extractProjectName(from: filePath)
+    // Detect language from resolved path
+    let language = detectLanguage(from: resolvedPath)
 
     logger.debug(
       "File context extracted",
@@ -854,12 +918,13 @@ actor ProjectIndexer: Sendable {
         "total_lines": "\(totalLines)",
         "extracted_lines": "\(extractedLines.count)",
         "language": "\(language)",
+        "project": "\(detectedProjectName)",
       ])
 
-    // Return as SearchResult
+    // Return as SearchResult with resolved absolute path
     return SearchResult.fileContext(
-      projectName: projectName,
-      filePath: filePath,
+      projectName: detectedProjectName,
+      filePath: resolvedPath,
       language: language,
       startLine: actualStart + 1,
       endLine: actualEnd,
