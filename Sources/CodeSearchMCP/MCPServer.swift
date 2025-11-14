@@ -52,7 +52,7 @@ actor MCPServer: Sendable {
     self.embeddingService = try await EmbeddingService(indexPath: indexPath)
     self.vectorSearchService = VectorSearchService(
       indexPath: indexPath, embeddingService: self.embeddingService)
-    try await self.vectorSearchService.initializeInMemoryIndex()
+    // Note: In-memory index initialized lazily on first search (prevents startup hang with large indexes)
     self.codeMetadataExtractor = CodeMetadataExtractor(indexPath: indexPath)
     self.projectIndexer = ProjectIndexer(
       indexPath: indexPath, embeddingService: self.embeddingService)

@@ -58,6 +58,8 @@ actor VectorSearchService: Sendable {
   /// with highest cosine similarity scores. Uses SIMD-optimized in-memory
   /// index when available for blazing fast performance.
   ///
+  /// Lazy initialization: Loads in-memory index on first search if not already loaded.
+  ///
   /// - Parameters:
   ///   - query: Natural language query or code snippet
   ///   - maxResults: Maximum number of results to return
@@ -69,6 +71,12 @@ actor VectorSearchService: Sendable {
     maxResults: Int = 10,
     projectFilter: String? = nil
   ) async throws -> [SearchResult] {
+    // Lazy initialization: Load in-memory index on first search
+    if !useInMemoryIndex {
+      logger.info("First search detected, initializing in-memory index...")
+      try await initializeInMemoryIndex()
+    }
+
     logger.debug(
       "Semantic search",
       metadata: [
