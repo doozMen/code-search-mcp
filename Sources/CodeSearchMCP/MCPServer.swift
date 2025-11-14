@@ -215,10 +215,10 @@ actor MCPServer: Sendable {
             ]),
             "projectFilter": .object([
               "type": "string",
-              "description": "Optional project name to limit search scope",
+              "description": "Project name to search in (REQUIRED). Use list_projects to see available projects or set CODE_SEARCH_PROJECT_NAME environment variable for default.",
             ]),
           ]),
-          "required": .array([.string("query")]),
+          "required": .array([.string("query"), .string("projectFilter")]),
         ])
       ),
 
@@ -406,19 +406,45 @@ actor MCPServer: Sendable {
     // Use environment default if no explicit filter provided
     let projectFilter = args["projectFilter"]?.stringValue ?? self.defaultProjectFilter
 
+    // Require projectFilter for focused, relevant results
+    guard let filter = projectFilter else {
+      let availableProjects = await projectIndexer.getIndexedProjects()
+        .prefix(10)
+        .map { $0.name }
+        .joined(separator: ", ")
+
+      throw MCPError.invalidParams("""
+        projectFilter is required for semantic search.
+
+        Searching across all projects would be too broad and return mixed results
+        from unrelated codebases. Specify which project to search.
+
+        Available projects (showing first 10):
+          \(availableProjects)
+
+        Example:
+          semantic_search(query: "\(query)", projectFilter: "rosselkit")
+
+        Set default filter with environment variable:
+          export CODE_SEARCH_PROJECT_NAME="your-project-name"
+
+        Use list_projects to see all indexed projects.
+        """)
+    }
+
     logger.debug(
       "Semantic search",
       metadata: [
         "query": "\(query)",
         "max_results": "\(maxResults)",
-        "project_filter": "\(projectFilter ?? "none")",
+        "project_filter": "\(filter)",
       ])
 
     // Delegate to vector search service
     let results = try await vectorSearchService.search(
       query: query,
       maxResults: maxResults,
-      projectFilter: projectFilter
+      projectFilter: filter
     )
 
     return formatSearchResults(results)
