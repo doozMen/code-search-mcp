@@ -397,7 +397,7 @@ struct SetupHooksCommand: AsyncParsableCommand {
 
     if [ -x "$BINARY" ]; then
       echo "📚 [post-commit] Re-indexing after commit..."
-      ("$BINARY" --log-level info --project-paths "$PROJECT_DIR" > /tmp/code-search-mcp-post-commit.log 2>&1 &)
+      ("$BINARY" index "$PROJECT_DIR" > /tmp/code-search-mcp-post-commit.log 2>&1 &)
     else
       echo "⚠️  code-search-mcp not found at $BINARY"
       echo "    Install with: cd ~/Developer/code-search-mcp && ./install.sh"
@@ -418,7 +418,7 @@ struct SetupHooksCommand: AsyncParsableCommand {
 
     if [ -x "$BINARY" ]; then
       echo "📚 [post-merge] Re-indexing after pull/merge..."
-      ("$BINARY" --log-level info --project-paths "$PROJECT_DIR" > /tmp/code-search-mcp-post-merge.log 2>&1 &)
+      ("$BINARY" index "$PROJECT_DIR" > /tmp/code-search-mcp-post-merge.log 2>&1 &)
     else
       echo "⚠️  code-search-mcp not found at $BINARY"
       echo "    Install with: cd ~/Developer/code-search-mcp && ./install.sh"
@@ -441,7 +441,7 @@ struct SetupHooksCommand: AsyncParsableCommand {
     if [ "$3" = "1" ]; then
       if [ -x "$BINARY" ]; then
         echo "📚 [post-checkout] Re-indexing after branch switch..."
-        ("$BINARY" --log-level info --project-paths "$PROJECT_DIR" > /tmp/code-search-mcp-post-checkout.log 2>&1 &)
+        ("$BINARY" index "$PROJECT_DIR" > /tmp/code-search-mcp-post-checkout.log 2>&1 &)
       else
         echo "⚠️  code-search-mcp not found at $BINARY"
         echo "    Install with: cd ~/Developer/code-search-mcp && ./install.sh"
